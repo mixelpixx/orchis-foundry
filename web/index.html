@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Orchis — modern self-hosted code platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" />
+<style>
+:root {
+  --font-sans: "Geist", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Light palette — warm-neutral whites, low chroma */
+  --bg: oklch(99% 0.003 90);
+  --bg-1: oklch(97.5% 0.004 90);
+  --bg-2: oklch(95.5% 0.005 90);
+  --bg-3: oklch(92.5% 0.006 90);
+  --line: oklch(91% 0.006 90);
+  --line-strong: oklch(85% 0.008 90);
+  --fg: oklch(22% 0.01 80);
+  --fg-1: oklch(38% 0.01 80);
+  --fg-2: oklch(55% 0.01 80);
+  --fg-3: oklch(70% 0.008 80);
+
+  --accent: oklch(62% 0.14 150);          /* soft green */
+  --accent-fg: oklch(98% 0.01 150);
+  --accent-soft: oklch(94% 0.04 150);
+  --accent-line: oklch(80% 0.08 150);
+
+  --warn: oklch(70% 0.13 70);
+  --danger: oklch(60% 0.16 25);
+  --info: oklch(62% 0.12 240);
+  --purple: oklch(60% 0.14 300);
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-sm: 0 1px 0 rgba(0,0,0,0.02), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 1px 0 rgba(0,0,0,0.02), 0 4px 12px rgba(0,0,0,0.05);
+  --shadow-lg: 0 1px 0 rgba(0,0,0,0.02), 0 12px 40px rgba(0,0,0,0.12);
+
+  --row-h: 32px;
+  --pad-x: 16px;
+  --t-xs: 11px;
+  --t-sm: 12.5px;
+  --t-md: 13.5px;
+  --t-lg: 15px;
+  --t-xl: 19px;
+  --t-2xl: 26px;
+  --t-3xl: 36px;
+}
+
+[data-theme="dark"] {
+  --bg: oklch(15% 0.005 250);
+  --bg-1: oklch(17.5% 0.006 250);
+  --bg-2: oklch(20.5% 0.007 250);
+  --bg-3: oklch(24.5% 0.008 250);
+  --line: oklch(25% 0.008 250);
+  --line-strong: oklch(32% 0.01 250);
+  --fg: oklch(96% 0.005 250);
+  --fg-1: oklch(82% 0.006 250);
+  --fg-2: oklch(64% 0.008 250);
+  --fg-3: oklch(48% 0.008 250);
+
+  --accent: oklch(72% 0.16 150);
+  --accent-fg: oklch(15% 0.02 150);
+  --accent-soft: oklch(28% 0.06 150);
+  --accent-line: oklch(45% 0.1 150);
+
+  --shadow-sm: 0 1px 0 rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.5);
+  --shadow-md: 0 1px 0 rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.5);
+  --shadow-lg: 0 1px 0 rgba(0,0,0,0.4), 0 12px 40px rgba(0,0,0,0.7);
+}
+
+[data-density="compact"] {
+  --row-h: 28px;
+  --pad-x: 12px;
+  --t-sm: 12px;
+  --t-md: 13px;
+}
+[data-density="cozy"] {
+  --row-h: 36px;
+  --pad-x: 20px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: var(--font-sans);
+  font-size: var(--t-md);
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.005em;
+  overflow: hidden;
+}
+
+#root { height: 100vh; }
+
+button { font-family: inherit; }
+
+/* Selection */
+::selection { background: var(--accent-soft); color: var(--fg); }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
+
+/* Common utilities */
+.row { display: flex; align-items: center; gap: 8px; }
+.col { display: flex; flex-direction: column; }
+.spacer { flex: 1; }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+.muted { color: var(--fg-2); }
+.subtle { color: var(--fg-3); }
+.dot { width: 6px; height: 6px; border-radius: 999px; background: var(--fg-3); display: inline-block; }
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  line-height: 1;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: var(--t-sm);
+  height: var(--row-h);
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 80ms, border-color 80ms, color 80ms;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--bg-2); border-color: var(--line-strong); }
+.btn:active { background: var(--bg-3); }
+.btn.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: transparent;
+  font-weight: 500;
+}
+.btn.primary:hover { filter: brightness(1.05); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--fg-1); }
+.btn.ghost:hover { background: var(--bg-2); color: var(--fg); }
+.btn.icon { width: var(--row-h); padding: 0; justify-content: center; }
+.btn.sm { height: 26px; font-size: var(--t-xs); padding: 0 8px; }
+
+/* Chips */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--t-xs);
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--fg-1);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.chip.accent { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.chip.warn { background: color-mix(in oklab, var(--warn) 14%, var(--bg)); color: var(--warn); border-color: color-mix(in oklab, var(--warn) 30%, var(--bg)); }
+.chip.danger { background: color-mix(in oklab, var(--danger) 14%, var(--bg)); color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, var(--bg)); }
+.chip.info { background: color-mix(in oklab, var(--info) 14%, var(--bg)); color: var(--info); border-color: color-mix(in oklab, var(--info) 30%, var(--bg)); }
+.chip.purple { background: color-mix(in oklab, var(--purple) 14%, var(--bg)); color: var(--purple); border-color: color-mix(in oklab, var(--purple) 30%, var(--bg)); }
+
+/* Inputs */
+.input {
+  font-family: inherit;
+  font-size: var(--t-sm);
+  height: var(--row-h);
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg);
+  outline: none;
+}
+.input:focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* Cards */
+.card {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+/* Section header */
+.section-title {
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Avatar */
+.avatar {
+  width: 22px; height: 22px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: white;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in oklab, currentColor 12%, transparent);
+}
+
+/* Loading skeleton bg-stripe placeholder */
+.placeholder {
+  background-image: repeating-linear-gradient(135deg,
+    var(--bg-2), var(--bg-2) 6px,
+    var(--bg-3) 6px, var(--bg-3) 12px);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Animations */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: fadeIn 160ms ease-out both; }
+
+/* Mobile responsiveness */
+@media (max-width: 760px) {
+  :root { --pad-x: 12px; }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- React + Babel pinned -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="src/icons.jsx"></script>
+<script type="text/babel" src="src/data.jsx"></script>
+<script type="text/babel" src="src/palette.jsx"></script>
+<script type="text/babel" src="src/sidebar.jsx"></script>
+<script type="text/babel" src="src/views/dashboard.jsx"></script>
+<script type="text/babel" src="src/views/repo.jsx"></script>
+<script type="text/babel" src="src/views/pr.jsx"></script>
+<script type="text/babel" src="src/views/devsettings.jsx"></script>
+<script type="text/babel" src="src/app.jsx"></script>
+</body>
+</html>

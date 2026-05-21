@@ -1,0 +1,9 @@
+/dist/
+/orchis-foundry
+/orchis-foundry.exe
+*.db
+*.db-shm
+*.db-wal
+/target/
+node_modules/
+.DS_Store
