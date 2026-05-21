@@ -1,0 +1,71 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Orchis Foundry API",
+    "version": "0.7.0",
+    "description": "Self-hosted code platform: git hosting, pull requests, per-user BYO-model supply-chain scanning, and LLM-friendly context endpoints. Authenticate with a personal access token: `Authorization: Bearer orc_pat_<...>`."
+  },
+  "servers": [{ "url": "/v1" }],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "orc_pat" }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/me": { "get": { "summary": "Current user", "responses": { "200": { "description": "User" }, "401": { "description": "Not signed in" } } } },
+    "/me/tokens": {
+      "get": { "summary": "List personal access tokens", "responses": { "200": { "description": "[Token]" } } },
+      "post": { "summary": "Create a token (secret returned once)", "responses": { "200": { "description": "TokenCreated" } } }
+    },
+    "/me/tokens/{id}/rotate": { "post": { "summary": "Rotate a token", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "TokenCreated" } } } },
+    "/me/tokens/{id}": { "delete": { "summary": "Revoke a token", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "204": { "description": "Deleted" } } } },
+    "/me/ssh-keys": {
+      "get": { "summary": "List SSH keys", "responses": { "200": { "description": "[SSHKey]" } } },
+      "post": { "summary": "Add an SSH key", "responses": { "200": { "description": "SSHKey" } } }
+    },
+    "/me/ssh-keys/{id}": { "delete": { "summary": "Remove an SSH key", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "204": { "description": "Deleted" } } } },
+    "/me/scanner": {
+      "get": { "summary": "Get scanner / model config (key masked)", "responses": { "200": { "description": "ScannerSettings" } } },
+      "put": { "summary": "Update scanner / model config", "responses": { "200": { "description": "ScannerSettings" } } }
+    },
+    "/repos": {
+      "get": { "summary": "List repos visible to you", "responses": { "200": { "description": "[Repo]" } } },
+      "post": { "summary": "Create a repo (bare git repo on disk)", "responses": { "200": { "description": "Repo" } } }
+    },
+    "/repos/{org}/{name}": {
+      "get": { "summary": "Get a repo", "responses": { "200": { "description": "Repo" } } },
+      "delete": { "summary": "Delete a repo", "responses": { "204": { "description": "Deleted" } } }
+    },
+    "/repos/{org}/{name}/tree": { "get": { "summary": "File tree (nested)", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }], "responses": { "200": { "description": "[Node]" } } } },
+    "/repos/{org}/{name}/blob": { "get": { "summary": "File contents", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }, { "name": "path", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Blob {content,lang,size,lines}" } } } },
+    "/repos/{org}/{name}/raw": { "get": { "summary": "Raw file bytes", "responses": { "200": { "description": "bytes" } } } },
+    "/repos/{org}/{name}/readme": { "get": { "summary": "README", "responses": { "200": { "description": "{content,format}" } } } },
+    "/repos/{org}/{name}/branches": { "get": { "summary": "List branches", "responses": { "200": { "description": "[Branch]" } } } },
+    "/repos/{org}/{name}/commits": { "get": { "summary": "List commits", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }, { "name": "limit", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "[Commit]" } } } },
+    "/repos/{org}/{name}/pack": { "get": { "summary": "Whole repo as one markdown document (LLM ingest)", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }, { "name": "maxBytes", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "text/markdown" } } } },
+    "/pulls": { "get": { "summary": "Pull requests across your repos", "parameters": [{ "name": "filter", "in": "query", "schema": { "type": "string", "enum": ["review-requested", "yours", "mentioned", "all"] } }], "responses": { "200": { "description": "[PullSummary]" } } } },
+    "/repos/{org}/{name}/pulls": {
+      "get": { "summary": "List PRs in a repo", "parameters": [{ "name": "state", "in": "query", "schema": { "type": "string", "enum": ["open", "closed", "merged", "all"] } }], "responses": { "200": { "description": "[PullSummary]" } } },
+      "post": { "summary": "Open a PR", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "title": { "type": "string" }, "head": { "type": "string" }, "base": { "type": "string" }, "body": { "type": "string" } }, "required": ["title", "head"] } } } }, "responses": { "200": { "description": "PullSummary" } } }
+    },
+    "/repos/{org}/{name}/pulls/{num}": {
+      "get": { "summary": "PR detail", "responses": { "200": { "description": "PullSummary" } } },
+      "patch": { "summary": "Edit PR title/body", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "title": { "type": "string" }, "body": { "type": "string" } } } } } }, "responses": { "200": { "description": "PullSummary" } } }
+    },
+    "/repos/{org}/{name}/pulls/{num}/files": { "get": { "summary": "PR diff (FileDiff[] with line comments)", "responses": { "200": { "description": "[FileDiff]" } } } },
+    "/repos/{org}/{name}/pulls/{num}/commits": { "get": { "summary": "PR commits", "responses": { "200": { "description": "[Commit]" } } } },
+    "/repos/{org}/{name}/pulls/{num}/comments": {
+      "get": { "summary": "PR comments", "responses": { "200": { "description": "[Comment]" } } },
+      "post": { "summary": "Post a comment (top-level or line-anchored)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "body": { "type": "string" }, "path": { "type": "string" }, "line": { "type": "integer" }, "side": { "type": "string", "enum": ["left", "right"] } }, "required": ["body"] } } } }, "responses": { "200": { "description": "Comment" } } }
+    },
+    "/repos/{org}/{name}/pulls/{num}/reviews": { "post": { "summary": "Submit a review", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "verdict": { "type": "string", "enum": ["comment", "approve", "changes"] }, "body": { "type": "string" } } } } } }, "responses": { "200": { "description": "ok" } } } },
+    "/repos/{org}/{name}/pulls/{num}/merge": { "post": { "summary": "Merge a PR", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "strategy": { "type": "string", "enum": ["merge", "squash", "rebase"] }, "commit_title": { "type": "string" }, "commit_body": { "type": "string" } } } } } }, "responses": { "200": { "description": "merged" }, "409": { "description": "conflict / not open" } } } },
+    "/repos/{org}/{name}/pulls/{num}/checks": { "get": { "summary": "Check runs for the PR head (incl. orchis-scan)", "responses": { "200": { "description": "[Check]" } } } },
+    "/repos/{org}/{name}/pulls/{num}/scan": { "post": { "summary": "Re-run the supply-chain scan", "responses": { "200": { "description": "queued" } } } },
+    "/repos/{org}/{name}/pulls/{num}/pack": { "get": { "summary": "PR as one markdown document (LLM ingest)", "responses": { "200": { "description": "text/markdown" } } } },
+    "/repos/{org}/{name}/pulls/{num}/summarize": { "post": { "summary": "Summarize the PR with your configured model", "responses": { "200": { "description": "{summary}" }, "409": { "description": "no model configured" } } } },
+    "/repos/{org}/{name}/pulls/{num}/explain": { "post": { "summary": "Explain the diff (optional ?file=) with your model", "parameters": [{ "name": "file", "in": "query", "schema": { "type": "string" } }], "responses": { "200": { "description": "{explanation}" } } } },
+    "/repos/{org}/{name}/pulls/{num}/draft-description": { "post": { "summary": "Draft a PR description with your model", "responses": { "200": { "description": "{description}" } } } }
+  }
+}

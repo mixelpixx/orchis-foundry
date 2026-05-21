@@ -50,6 +50,9 @@ func (s *Server) Router() http.Handler {
 	// Internal hook callback (guarded by shared secret).
 	r.Post("/internal/hooks/push", s.handlePushHook)
 
+	// LLM-agent discovery (public).
+	r.Get("/llms.txt", s.handleLLMsTxt)
+
 	// Smart HTTP git endpoints (clone/push). Registered at root so clone URLs
 	// look like https://host/<owner>/<repo>.git
 	s.registerGitHTTP(r)
@@ -61,6 +64,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/ping", func(w http.ResponseWriter, _ *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"pong": "ok"})
 		})
+		r.Get("/openapi.json", s.handleOpenAPI)
 
 		// Auth & session
 		r.Get("/auth/oidc/callback", s.handleOIDCCallback)
@@ -94,12 +98,18 @@ func (s *Server) Router() http.Handler {
 		r.Get("/repos/{org}/{name}/readme", s.handleRepoReadme)
 		r.Get("/repos/{org}/{name}/branches", s.handleRepoBranches)
 		r.Get("/repos/{org}/{name}/commits", s.handleRepoCommits)
+		r.Get("/repos/{org}/{name}/pack", s.handleRepoPack)
 
 		// Pull requests (read + create)
 		r.Get("/pulls", s.requireUser(s.handleListPullsGlobal))
 		r.Get("/repos/{org}/{name}/pulls", s.handleListRepoPulls)
 		r.Post("/repos/{org}/{name}/pulls", s.requireScope("repo:write", s.handleCreatePull))
 		r.Get("/repos/{org}/{name}/pulls/{num}", s.handleGetPull)
+		r.Patch("/repos/{org}/{name}/pulls/{num}", s.requireScope("repo:write", s.handleUpdatePull))
+		r.Get("/repos/{org}/{name}/pulls/{num}/pack", s.handlePRPack)
+		r.Post("/repos/{org}/{name}/pulls/{num}/summarize", s.requireUser(s.handleSummarizePR))
+		r.Post("/repos/{org}/{name}/pulls/{num}/explain", s.requireUser(s.handleExplainPR))
+		r.Post("/repos/{org}/{name}/pulls/{num}/draft-description", s.requireUser(s.handleDraftDescription))
 		r.Get("/repos/{org}/{name}/pulls/{num}/files", s.handlePullFiles)
 		r.Get("/repos/{org}/{name}/pulls/{num}/commits", s.handlePullCommits)
 		r.Get("/repos/{org}/{name}/pulls/{num}/comments", s.handlePullComments)

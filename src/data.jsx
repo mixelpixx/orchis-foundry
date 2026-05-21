@@ -398,6 +398,15 @@ const OrchisAPI = {
     if (!r.ok) throw new Error(path + " -> " + r.status);
     return r.json();
   },
+  async patch(path, body) {
+    const r = await fetch(path, {
+      method: "PATCH", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) throw new Error(path + " -> " + r.status);
+    return r.json();
+  },
   async del(path) {
     const r = await fetch(path, { method: "DELETE", credentials: "same-origin" });
     if (!r.ok && r.status !== 204) throw new Error(path + " -> " + r.status);

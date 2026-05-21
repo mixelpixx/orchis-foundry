@@ -457,11 +457,12 @@ function ScannerPanel() {
     <>
       <div style={dsStyles.head}>
         <div>
-          <h2 style={dsStyles.h2}>Supply-chain scanner</h2>
+          <h2 style={dsStyles.h2}>Your model (scanner + AI assist)</h2>
           <p className="muted" style={dsStyles.subtitle}>
-            Your own model scans every PR diff for supply-chain risks. Use Claude, or point at any OpenAI-compatible
-            endpoint you host (Ollama, LM Studio, vLLM, llama.cpp). Runs as the <span className="mono">orchis-scan</span> check
-            on PRs in repos you own.
+            One model config, used two ways: it powers the <span className="mono">orchis-scan</span> supply-chain check on
+            PRs in repos you own, and the in-PR <strong>AI assist</strong> (Summarize / Explain diff / Draft description).
+            Use Claude, or point at any OpenAI-compatible endpoint you host (Ollama, LM Studio, vLLM, llama.cpp).
+            The "enable scanning" toggle below only controls the automatic scan; AI assist works whenever a model is set.
           </p>
         </div>
       </div>

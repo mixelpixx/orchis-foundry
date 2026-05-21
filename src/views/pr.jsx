@@ -46,6 +46,31 @@ function PRView({ prId, repo, setRoute }) {
     reload();
   };
 
+  // AI assist (uses the requesting user's configured model).
+  const [modelOk, setModelOk] = React.useState(false);
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get("/v1/me/scanner").then(c => setModelOk(!!(c.hasKey || c.baseUrl))).catch(() => {});
+    }
+  }, []);
+  const [aiBusy, setAiBusy] = React.useState("");
+  const [aiResult, setAiResult] = React.useState(null); // { label, text, canApply }
+  const runAI = async (label, path, canApply) => {
+    if (!base) return;
+    setAiBusy(path); setAiResult(null);
+    try {
+      const r = await window.OrchisAPI.post(base + "/" + path, {});
+      setAiResult({ label, text: r.summary || r.explanation || r.description || "", canApply: !!canApply });
+    } catch (e) {
+      setAiResult({ label, text: "_Could not run. Make sure your model is configured in Developer settings → Scanner._", canApply: false });
+    } finally { setAiBusy(""); }
+  };
+  const applyDraft = async () => {
+    if (!aiResult) return;
+    await window.OrchisAPI.patch(base, { body: aiResult.text }).catch(() => {});
+    setAiResult(null); reload();
+  };
+
   if (!pr) return <div style={{ padding: 40 }} className="muted">Loading pull request…</div>;
   const statusLabel = (pr.status || "open").charAt(0).toUpperCase() + (pr.status || "open").slice(1);
 
@@ -108,6 +133,29 @@ function PRView({ prId, repo, setRoute }) {
         <span className="spacer" />
         <span className="muted" style={{ fontSize: 11.5 }}>{pr.comments} comments</span>
       </div>
+
+      {/* AI assist */}
+      {modelOk ? (
+        <div className="row" style={{ gap: 6, padding: "8px 24px", borderBottom: "1px solid var(--line)", background: "var(--bg-1)" }}>
+          <span className="subtle" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 4 }}>AI assist</span>
+          <button className="btn sm" disabled={!!aiBusy} onClick={() => runAI("Summary", "summarize", false)}>{aiBusy === "summarize" ? "Summarizing…" : "Summarize"}</button>
+          <button className="btn sm" disabled={!!aiBusy} onClick={() => runAI("Explanation", "explain", false)}>{aiBusy === "explain" ? "Explaining…" : "Explain diff"}</button>
+          <button className="btn sm" disabled={!!aiBusy} onClick={() => runAI("Drafted description", "draft-description", true)}>{aiBusy === "draft-description" ? "Drafting…" : "Draft description"}</button>
+          <span className="spacer" />
+          <span className="subtle" style={{ fontSize: 11 }}>uses your configured model</span>
+        </div>
+      ) : null}
+      {aiResult ? (
+        <div style={{ padding: "12px 24px 16px", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
+          <div className="row" style={{ marginBottom: 8, gap: 8 }}>
+            <strong style={{ fontSize: 13 }}>AI · {aiResult.label}</strong>
+            <span className="spacer" />
+            {aiResult.canApply ? <button className="btn sm" onClick={applyDraft}>Apply to PR description</button> : null}
+            <button className="btn ghost icon sm" onClick={() => setAiResult(null)} title="Dismiss"><Icons.Close size={11} /></button>
+          </div>
+          <div style={{ fontSize: 13.5, lineHeight: 1.6, maxWidth: 860 }}>{parseMd(aiResult.text || "")}</div>
+        </div>
+      ) : null}
 
       {/* Tabs */}
       <div style={prStyles.tabs}>

@@ -1,13 +1,35 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/orchis-ai/foundry/internal/scan"
 )
+
+// modelSettings loads a user's configured LLM provider creds (from the
+// scanner_settings row). usable=true when a model is actually reachable
+// (an API key for Anthropic, or a base URL for an OpenAI-compatible endpoint).
+// Used by both the scanner (repo owner's model) and in-app AI (requester's model).
+func (s *Server) modelSettings(ctx context.Context, userID int64) (scan.Settings, bool) {
+	var st scan.Settings
+	var enabled int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT enabled, provider, base_url, model, api_key FROM scanner_settings WHERE user_id = ?`, userID).
+		Scan(&enabled, &st.Provider, &st.BaseURL, &st.Model, &st.APIKey)
+	if err != nil {
+		return scan.Settings{}, false
+	}
+	st.Enabled = enabled == 1
+	usable := (st.Provider == "anthropic" && st.APIKey != "") ||
+		(st.Provider == "openai_compatible" && st.BaseURL != "")
+	return st, usable
+}
 
 // GET /v1/me/scanner — returns the user's scanner config (api_key masked).
 func (s *Server) handleGetScanner(w http.ResponseWriter, r *http.Request) {
