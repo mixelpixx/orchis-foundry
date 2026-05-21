@@ -105,6 +105,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/repos/{org}/{name}/pulls/{num}/comments", s.handlePullComments)
 		r.Get("/repos/{org}/{name}/pulls/{num}/checks", s.handlePullChecks)
 		r.Post("/repos/{org}/{name}/pulls/{num}/scan", s.requireScope("repo:write", s.handleRescan))
+		r.Post("/repos/{org}/{name}/pulls/{num}/comments", s.requireScope("repo:write", s.handleCreateComment))
+		r.Post("/repos/{org}/{name}/pulls/{num}/reviews", s.requireScope("repo:write", s.handleSubmitReview))
+		r.Post("/repos/{org}/{name}/pulls/{num}/merge", s.requireScope("repo:write", s.handleMerge))
 	})
 
 	// Everything else serves the frontend (SPA-style: unknown paths → index.html).

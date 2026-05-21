@@ -12,15 +12,39 @@ function PRView({ prId, repo, setRoute }) {
   const [openComment, setOpenComment] = React.useState(null);  // {fileIdx, lineKey}
   const [draftComments, setDraftComments] = React.useState({});
 
-  React.useEffect(() => {
-    if (!window.OrchisAPI || !repo) return;
-    const base = `/v1/repos/${repo}/pulls/${prId}`;
+  const base = repo ? `/v1/repos/${repo}/pulls/${prId}` : null;
+  const reload = React.useCallback(() => {
+    if (!window.OrchisAPI || !base) return;
     window.OrchisAPI.get(base).then(setPr).catch(() => {});
     window.OrchisAPI.get(base + "/files").then(setFiles).catch(() => setFiles([]));
     window.OrchisAPI.get(base + "/commits").then(setCommits).catch(() => setCommits([]));
     window.OrchisAPI.get(base + "/checks").then(setChecks).catch(() => setChecks([]));
     window.OrchisAPI.get(base + "/comments").then(setComments).catch(() => setComments([]));
-  }, [repo, prId]);
+  }, [base]);
+  React.useEffect(() => { reload(); }, [reload]);
+
+  const [merging, setMerging] = React.useState(false);
+  const [actionErr, setActionErr] = React.useState("");
+
+  const doMerge = async (strategy) => {
+    setActionErr(""); setMerging(true);
+    try {
+      await window.OrchisAPI.post(base + "/merge", { strategy: strategy || "merge" });
+      reload();
+    } catch (e) {
+      setActionErr("Merge failed — likely a conflict, or you're not the repo owner.");
+    } finally { setMerging(false); }
+  };
+  const doReview = async (verdict, body) => {
+    if (!window.OrchisAPI || !base) return;
+    await window.OrchisAPI.post(base + "/reviews", { verdict, body, comments: [] }).catch(() => {});
+    reload();
+  };
+  const postComment = async (body, extra) => {
+    if (!window.OrchisAPI || !base || !body.trim()) return;
+    await window.OrchisAPI.post(base + "/comments", { body, ...(extra || {}) }).catch(() => {});
+    reload();
+  };
 
   if (!pr) return <div style={{ padding: 40 }} className="muted">Loading pull request…</div>;
   const statusLabel = (pr.status || "open").charAt(0).toUpperCase() + (pr.status || "open").slice(1);
@@ -50,14 +74,21 @@ function PRView({ prId, repo, setRoute }) {
         </div>
 
         <div className="row" style={{ gap: 6, flexShrink: 0 }}>
-          <button className="btn sm" onClick={() => setReviewing(true)}>
-            <Icons.Check size={12} /> Review
-          </button>
-          <button className="btn primary sm">
-            <Icons.Branch size={12} /> Merge
-          </button>
+          {pr.status === "merged" ? (
+            <span className="chip" style={{ color: "var(--purple, var(--accent))" }}>Merged</span>
+          ) : (
+            <>
+              <button className="btn sm" onClick={() => setReviewing(true)}>
+                <Icons.Check size={12} /> Review
+              </button>
+              <button className="btn primary sm" disabled={merging} onClick={() => doMerge("merge")}>
+                <Icons.Branch size={12} /> {merging ? "Merging…" : "Merge"}
+              </button>
+            </>
+          )}
         </div>
       </div>
+      {actionErr ? <div style={{ padding: "8px 24px", color: "var(--danger)", fontSize: 12.5, background: "var(--bg-1)", borderBottom: "1px solid var(--line)" }}>{actionErr}</div> : null}
 
       {/* Compact status strip */}
       <div style={prStyles.statusStrip}>
@@ -88,7 +119,7 @@ function PRView({ prId, repo, setRoute }) {
 
       <div style={prStyles.body}>
         {tab === "files" ? <FilesChanged files={files != null ? files : PR_DIFF_FILES} openComment={openComment} setOpenComment={setOpenComment} draftComments={draftComments} setDraftComments={setDraftComments} /> : null}
-        {tab === "conversation" ? <Conversation pr={pr} comments={comments} /> : null}
+        {tab === "conversation" ? <Conversation pr={pr} comments={comments} postComment={postComment} /> : null}
         {tab === "commits" ? <CommitsList commits={commits} /> : null}
         {tab === "checks" ? <ChecksList checks={checks} /> : null}
       </div>
@@ -100,7 +131,7 @@ function PRView({ prId, repo, setRoute }) {
           verdict={reviewVerdict}
           setVerdict={setReviewVerdict}
           onCancel={() => setReviewing(false)}
-          onSubmit={() => { setReviewing(false); setReviewBody(""); }}
+          onSubmit={() => { doReview(reviewVerdict, reviewBody); setReviewing(false); setReviewBody(""); }}
         />
       ) : null}
     </div>
@@ -254,7 +285,8 @@ function NewCommentBox({ onCancel, onSubmit }) {
   );
 }
 
-function Conversation({ pr, comments }) {
+function Conversation({ pr, comments, postComment }) {
+  const [draft, setDraft] = React.useState("");
   // Top-level comments only (no line/path) — line comments live in the diff.
   const topLevel = (comments || []).filter(c => c.line == null && !c.path);
   return (
@@ -269,14 +301,14 @@ function Conversation({ pr, comments }) {
       ))}
 
       <div className="card" style={{ marginTop: 18, padding: 14 }}>
-        <textarea placeholder="Leave a comment…" style={{
+        <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder="Leave a comment…" style={{
           width: "100%", minHeight: 90, padding: 10, border: "1px solid var(--line)", borderRadius: 6,
           background: "var(--bg)", color: "var(--fg)", fontFamily: "inherit", fontSize: 13, resize: "vertical",
         }} />
         <div className="row" style={{ marginTop: 10, gap: 6 }}>
           <span className="muted" style={{ fontSize: 11.5 }}>Supports markdown</span>
           <span className="spacer" />
-          <button className="btn primary sm">Comment</button>
+          <button className="btn primary sm" disabled={!draft.trim()} onClick={() => { postComment && postComment(draft); setDraft(""); }}>Comment</button>
         </div>
       </div>
     </div>
