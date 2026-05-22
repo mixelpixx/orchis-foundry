@@ -42,6 +42,9 @@
       "get": { "summary": "Get your UI preferences", "responses": { "200": { "description": "{theme,accent,density,font,showSplitTip}" } } },
       "patch": { "summary": "Update UI preferences (merged; validated allowlist)", "responses": { "200": { "description": "preferences" } } }
     },
+    "/me/sessions": { "get": { "summary": "List your active sessions", "responses": { "200": { "description": "[{id,created,lastSeen,current}]" } } } },
+    "/me/sessions/{id}": { "delete": { "summary": "Revoke a session", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "Revoked" } } } },
+    "/me/sessions/revoke-others": { "post": { "summary": "Sign out everywhere except this device", "responses": { "204": { "description": "Done" } } } },
     "/me/scanner": {
       "get": { "summary": "Get scanner / model config (key masked)", "responses": { "200": { "description": "ScannerSettings" } } },
       "put": { "summary": "Update scanner / model config", "responses": { "200": { "description": "ScannerSettings" } } }

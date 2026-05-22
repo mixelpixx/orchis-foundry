@@ -7535,6 +7535,10 @@ function DevSettingsView({
     label: "SSH keys",
     icon: /*#__PURE__*/React.createElement(Icons.Key, null)
   }, {
+    id: "security",
+    label: "Security",
+    icon: /*#__PURE__*/React.createElement(Icons.Check, null)
+  }, {
     id: "scanner",
     label: "Scanner",
     icon: /*#__PURE__*/React.createElement(Icons.Bolt, null)
@@ -7614,7 +7618,7 @@ function DevSettingsView({
     }
   }, t.count) : null))), /*#__PURE__*/React.createElement("div", {
     style: dsStyles.main
-  }, tab === "account" ? /*#__PURE__*/React.createElement(AccountPanel, null) : null, tab === "tokens" ? /*#__PURE__*/React.createElement(TokensPanel, {
+  }, tab === "account" ? /*#__PURE__*/React.createElement(AccountPanel, null) : null, tab === "security" ? /*#__PURE__*/React.createElement(SecurityPanel, null) : null, tab === "tokens" ? /*#__PURE__*/React.createElement(TokensPanel, {
     newToken: newToken,
     setNewToken: setNewToken,
     generated: generatedToken,
@@ -8652,6 +8656,106 @@ function AccountPanel() {
     disabled: busy || !name.trim(),
     onClick: save
   }, busy ? "Saving…" : "Save changes"))));
+}
+
+// Security — active sessions: see them, revoke one, sign out everywhere else.
+function SecurityPanel() {
+  const [sessions, setSessions] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const reload = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get("/v1/me/sessions").then(setSessions).catch(() => setSessions([]));
+  }, []);
+  React.useEffect(() => {
+    reload();
+  }, [reload]);
+  const list = sessions || [];
+  const revoke = async id => {
+    try {
+      await window.OrchisAPI.del("/v1/me/sessions/" + id);
+      reload();
+    } catch (e) {}
+  };
+  const revokeOthers = async () => {
+    setBusy(true);
+    try {
+      await window.OrchisAPI.post("/v1/me/sessions/revoke-others");
+      reload();
+    } catch (e) {} finally {
+      setBusy(false);
+    }
+  };
+  const others = list.filter(s => !s.current).length;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: dsStyles.head
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
+    style: dsStyles.h2
+  }, "Security"), /*#__PURE__*/React.createElement("p", {
+    className: "muted",
+    style: dsStyles.subtitle
+  }, "Active browser sessions on your account. Revoke any you don't recognize.")), others > 0 ? /*#__PURE__*/React.createElement("button", {
+    className: "btn",
+    disabled: busy,
+    onClick: revokeOthers
+  }, busy ? "Signing out…" : "Sign out other sessions") : null), sessions == null ? /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      padding: 20
+    }
+  }, "Loading\u2026") : /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginTop: 14
+    }
+  }, list.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "18px",
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "No active sessions.") : list.map((s, i) => /*#__PURE__*/React.createElement("div", {
+    key: s.id,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 14,
+      padding: "14px 18px",
+      borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none"
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Check, {
+    size: 16,
+    style: {
+      color: s.current ? "var(--accent)" : "var(--fg-3)"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      fontWeight: 500
+    }
+  }, "Browser session ", s.current ? /*#__PURE__*/React.createElement("span", {
+    className: "chip accent",
+    style: {
+      height: 18,
+      fontSize: 10.5,
+      marginLeft: 6
+    }
+  }, "this device") : null), /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5,
+      marginTop: 3
+    }
+  }, "Started ", s.created, " \xB7 last active ", s.lastSeen)), s.current ? null : /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    style: {
+      color: "var(--danger)"
+    },
+    onClick: () => revoke(s.id)
+  }, "Revoke")))));
 }
 
 // Scanner — per-user, BYO endpoint. Drives the orchis-scan PR check.

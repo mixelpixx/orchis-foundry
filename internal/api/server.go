@@ -78,6 +78,9 @@ func (s *Server) Router() http.Handler {
 		r.Patch("/me", s.requireUser(s.handlePatchMe))
 		r.Get("/me/preferences", s.requireUser(s.handleGetPreferences))
 		r.Patch("/me/preferences", s.requireUser(s.handlePatchPreferences))
+		r.Get("/me/sessions", s.requireUser(s.handleListSessions))
+		r.Delete("/me/sessions/{id}", s.requireUser(s.handleRevokeSession))
+		r.Post("/me/sessions/revoke-others", s.requireUser(s.handleRevokeOtherSessions))
 
 		// Personal access tokens
 		r.Get("/me/tokens", s.requireUser(s.handleListTokens))

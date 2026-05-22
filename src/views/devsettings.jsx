@@ -17,6 +17,7 @@ function DevSettingsView({ route, setRoute }) {
     { id: "account", label: "Account", icon: <Icons.Eye /> },
     { id: "tokens", label: "Tokens", icon: <Icons.Key /> },
     { id: "ssh", label: "SSH keys", icon: <Icons.Key /> },
+    { id: "security", label: "Security", icon: <Icons.Check /> },
     { id: "scanner", label: "Scanner", icon: <Icons.Bolt /> },
     { id: "webhooks", label: "Webhooks", icon: <Icons.Webhook /> },
     { id: "apps", label: "OAuth apps", icon: <Icons.Bolt /> },
@@ -50,6 +51,7 @@ function DevSettingsView({ route, setRoute }) {
 
           <div style={dsStyles.main}>
             {tab === "account" ? <AccountPanel /> : null}
+            {tab === "security" ? <SecurityPanel /> : null}
             {tab === "tokens" ? (
               <TokensPanel newToken={newToken} setNewToken={setNewToken} generated={generatedToken} setGenerated={setGeneratedToken} />
             ) : null}
@@ -549,6 +551,54 @@ function AccountPanel() {
           <button className="btn primary" disabled={busy || !name.trim()} onClick={save}>{busy ? "Saving…" : "Save changes"}</button>
         </div>
       </div>
+    </>
+  );
+}
+
+// Security — active sessions: see them, revoke one, sign out everywhere else.
+function SecurityPanel() {
+  const [sessions, setSessions] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const reload = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get("/v1/me/sessions").then(setSessions).catch(() => setSessions([]));
+  }, []);
+  React.useEffect(() => { reload(); }, [reload]);
+  const list = sessions || [];
+  const revoke = async (id) => { try { await window.OrchisAPI.del("/v1/me/sessions/" + id); reload(); } catch (e) {} };
+  const revokeOthers = async () => {
+    setBusy(true);
+    try { await window.OrchisAPI.post("/v1/me/sessions/revoke-others"); reload(); } catch (e) {} finally { setBusy(false); }
+  };
+  const others = list.filter(s => !s.current).length;
+
+  return (
+    <>
+      <div style={dsStyles.head}>
+        <div>
+          <h2 style={dsStyles.h2}>Security</h2>
+          <p className="muted" style={dsStyles.subtitle}>Active browser sessions on your account. Revoke any you don't recognize.</p>
+        </div>
+        {others > 0 ? <button className="btn" disabled={busy} onClick={revokeOthers}>{busy ? "Signing out…" : "Sign out other sessions"}</button> : null}
+      </div>
+
+      {sessions == null ? <div className="muted" style={{ padding: 20 }}>Loading…</div> : (
+      <div className="card" style={{ marginTop: 14 }}>
+        {list.length === 0 ? (
+          <div style={{ padding: "18px", color: "var(--fg-3)", fontSize: 13 }}>No active sessions.</div>
+        ) : list.map((s, i) => (
+          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none" }}>
+            <Icons.Check size={16} style={{ color: s.current ? "var(--accent)" : "var(--fg-3)" }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 500 }}>
+                Browser session {s.current ? <span className="chip accent" style={{ height: 18, fontSize: 10.5, marginLeft: 6 }}>this device</span> : null}
+              </div>
+              <div className="subtle" style={{ fontSize: 11.5, marginTop: 3 }}>Started {s.created} · last active {s.lastSeen}</div>
+            </div>
+            {s.current ? null : <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={() => revoke(s.id)}>Revoke</button>}
+          </div>
+        ))}
+      </div>
+      )}
     </>
   );
 }

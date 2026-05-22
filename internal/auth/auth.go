@@ -147,6 +147,76 @@ func (m *Manager) UpdateProfile(ctx context.Context, userID int64, name, bio str
 	return err
 }
 
+// SessionInfo describes one active session for the security UI. PubID is a
+// non-reversible handle (hash prefix of the secret session id) — safe to
+// expose; the raw session id (the cookie credential) is never returned.
+type SessionInfo struct {
+	PubID      string `json:"id"`
+	CreatedAt  string `json:"createdAt"`
+	LastSeenAt string `json:"lastSeenAt"`
+	Current    bool   `json:"current"`
+}
+
+func sessionPub(id string) string {
+	sum := sha256.Sum256([]byte("sess-pub:" + id))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// SessionID returns the caller's session cookie value, or "" (e.g. PAT auth).
+func (m *Manager) SessionID(r *http.Request) string {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return ""
+	}
+	return c.Value
+}
+
+// ListSessions returns the user's active sessions, flagging the current one.
+func (m *Manager) ListSessions(ctx context.Context, userID int64, currentID string) ([]SessionInfo, error) {
+	rows, err := m.db.QueryContext(ctx,
+		`SELECT id, created_at, last_seen_at FROM sessions WHERE user_id = ? ORDER BY last_seen_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SessionInfo{}
+	for rows.Next() {
+		var id, created, seen string
+		if rows.Scan(&id, &created, &seen) == nil {
+			out = append(out, SessionInfo{PubID: sessionPub(id), CreatedAt: created, LastSeenAt: seen, Current: id == currentID})
+		}
+	}
+	return out, nil
+}
+
+// RevokeSessionByPub deletes one of the user's sessions matched by its public
+// handle. Only the owning user's sessions are considered.
+func (m *Manager) RevokeSessionByPub(ctx context.Context, userID int64, pub string) error {
+	rows, err := m.db.QueryContext(ctx, `SELECT id FROM sessions WHERE user_id = ?`, userID)
+	if err != nil {
+		return err
+	}
+	var match string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil && sessionPub(id) == pub {
+			match = id
+			break
+		}
+	}
+	rows.Close()
+	if match != "" {
+		_, _ = m.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ? AND user_id = ?`, match, userID)
+	}
+	return nil
+}
+
+// RevokeOtherSessions signs the user out of every session except currentID.
+func (m *Manager) RevokeOtherSessions(ctx context.Context, userID int64, currentID string) error {
+	_, err := m.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ? AND id != ?`, userID, currentID)
+	return err
+}
+
 // CreateSession mints a session row and sets the cookie.
 func (m *Manager) CreateSession(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int64) error {
 	id := randHex(32)
