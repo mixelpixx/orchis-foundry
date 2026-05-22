@@ -40,6 +40,7 @@ const SOURCES = [
   "src/views/repo.jsx",
   "src/views/pr.jsx",
   "src/views/devsettings.jsx",
+  "src/views/search.jsx",
   "src/app.jsx",
 ];
 

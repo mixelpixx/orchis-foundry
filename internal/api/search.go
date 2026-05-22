@@ -1,12 +1,158 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/orchis-ai/foundry/internal/auth"
 	gitstore "github.com/orchis-ai/foundry/internal/git"
 )
+
+// langPathspecs maps a ?lang= value to git pathspec globs. The globs are
+// server-controlled (never user input) so they can't be used to traverse or
+// inject. Unknown languages return nil (search everything).
+var langPathspecs = map[string][]string{
+	"go":   {"*.go"},
+	"js":   {"*.js", "*.jsx", "*.mjs"},
+	"ts":   {"*.ts", "*.tsx"},
+	"py":   {"*.py"},
+	"rs":   {"*.rs"},
+	"rb":   {"*.rb"},
+	"java": {"*.java"},
+	"c":    {"*.c", "*.h"},
+	"cpp":  {"*.cc", "*.cpp", "*.hpp", "*.cxx"},
+	"sh":   {"*.sh"},
+	"md":   {"*.md"},
+	"json": {"*.json"},
+	"yaml": {"*.yaml", "*.yml"},
+	"html": {"*.html", "*.htm"},
+	"css":  {"*.css"},
+}
+
+const (
+	codeSearchTimeout  = 8 * time.Second
+	codeSearchMaxHits  = 100
+	codeSearchMaxRepos = 5
+)
+
+// GET /v1/search/code?q=&repo=&ref=&lang= — full-text code search via git grep.
+//
+// Security: the query is searched literally (fixed-string) and bound to git's
+// -e option so it can't be read as a flag; refs are resolved to a hex sha
+// before reaching git; repos are addressed by integer id (no user path); lang
+// maps only to a server-side glob allowlist; results, per-file matches, and
+// wall-clock are all bounded. Single-repo searches go through the same ACL as
+// other repo reads (public, or owner for private).
+func (s *Server) handleCodeSearch(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		writeJSON(w, http.StatusOK, []map[string]any{})
+		return
+	}
+	pathspecs := langPathspecs[strings.ToLower(strings.TrimSpace(r.URL.Query().Get("lang")))]
+
+	ctx, cancel := context.WithTimeout(r.Context(), codeSearchTimeout)
+	defer cancel()
+
+	out := []map[string]any{}
+
+	repoParam := strings.TrimSpace(r.URL.Query().Get("repo"))
+	if repoParam != "" {
+		parts := strings.SplitN(repoParam, "/", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			writeError(w, http.StatusBadRequest, "repo must be org/name")
+			return
+		}
+		row, err := s.repoForOwnerName(parts[0], parts[1])
+		if err != nil || !codeSearchReadable(row, u) {
+			writeError(w, http.StatusNotFound, "repo not found")
+			return
+		}
+		ref := strings.TrimSpace(r.URL.Query().Get("ref"))
+		if ref == "" {
+			ref = row.DefaultBranch
+		}
+		sha, err := s.git.RevParse(row.ID, ref)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "ref not found: "+ref)
+			return
+		}
+		s.grepInto(ctx, &out, row.ID, row.OwnerHandle+"/"+row.Name, sha, ref, q, pathspecs)
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	// No repo specified — search the user's few most-recently-active readable
+	// repos at their default branch. Bounded to keep this cheap.
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT rp.id, u.handle, rp.name, rp.default_branch
+		 FROM repos rp JOIN users u ON u.id = rp.owner_user_id
+		 WHERE rp.owner_user_id = ? OR rp.visibility = 'public'
+		 ORDER BY COALESCE(rp.pushed_at, rp.created_at) DESC
+		 LIMIT ?`, u.ID, codeSearchMaxRepos)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "search failed")
+		return
+	}
+	type cand struct {
+		id            int64
+		label, branch string
+	}
+	var cands []cand
+	for rows.Next() {
+		var c cand
+		var owner, name string
+		if rows.Scan(&c.id, &owner, &name, &c.branch) == nil {
+			c.label = owner + "/" + name
+			cands = append(cands, c)
+		}
+	}
+	rows.Close()
+
+	for _, c := range cands {
+		if len(out) >= codeSearchMaxHits {
+			break
+		}
+		sha, err := s.git.RevParse(c.id, c.branch)
+		if err != nil {
+			continue
+		}
+		s.grepInto(ctx, &out, c.id, c.label, sha, c.branch, q, pathspecs)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// grepInto runs one repo's grep and appends shaped hits to out, respecting the
+// overall hit cap.
+func (s *Server) grepInto(ctx context.Context, out *[]map[string]any, repoID int64, label, sha, ref, q string, pathspecs []string) {
+	remaining := codeSearchMaxHits - len(*out)
+	if remaining <= 0 {
+		return
+	}
+	hits, _ := s.git.Grep(ctx, repoID, sha, q, pathspecs, 20)
+	for _, h := range hits {
+		if len(*out) >= codeSearchMaxHits {
+			return
+		}
+		*out = append(*out, map[string]any{
+			"repo": label, "path": h.Path, "ref": ref, "line": h.Line, "text": h.Text,
+			"route": map[string]any{"view": "repo", "repo": label, "file": h.Path},
+		})
+	}
+}
+
+// codeSearchReadable mirrors loadRepo's ACL for a repo resolved by query param
+// (loadRepo reads chi URL params, which code search doesn't use).
+func codeSearchReadable(row *repoRow, u *auth.User) bool {
+	if row.Visibility == "public" {
+		return true
+	}
+	return u != nil && row.OwnerUserID.Valid && row.OwnerUserID.Int64 == u.ID
+}
 
 // GET /v1/search/palette?q= — ranked hits across repos, pulls, and files for
 // the ⌘K command palette. Quick-action and navigation groups are built on the

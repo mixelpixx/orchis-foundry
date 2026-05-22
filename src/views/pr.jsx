@@ -33,7 +33,7 @@ function PRView({ prId, repo, setRoute }) {
     es.onopen = () => setLive(true);
     es.onerror = () => setLive(false);
     const onEvent = () => reload();
-    ["pull.commented", "pull.reviewed", "pull.merged", "check.updated"].forEach(k => es.addEventListener(k, onEvent));
+    ["pull.commented", "pull.reviewed", "pull.merged", "check.updated", "pull.reviewers-changed"].forEach(k => es.addEventListener(k, onEvent));
     return () => { es.close(); setLive(false); };
   }, [repo, prId, reload]);
 
@@ -62,6 +62,17 @@ function PRView({ prId, repo, setRoute }) {
     if (!window.OrchisAPI || !base || !body.trim()) return;
     await window.OrchisAPI.post(base + "/comments", { body, ...(extra || {}) }).catch(() => {});
     reload();
+  };
+  const [reqOpen, setReqOpen] = React.useState(false);
+  const [reqHandle, setReqHandle] = React.useState("");
+  const [reqErr, setReqErr] = React.useState("");
+  const requestReview = async () => {
+    if (!base || !reqHandle.trim()) return;
+    setReqErr("");
+    try {
+      await window.OrchisAPI.post(base + "/request-review", { reviewer: reqHandle.trim() });
+      setReqHandle(""); setReqOpen(false); reload();
+    } catch (e) { setReqErr("Couldn't request — check the handle exists and you own the repo or authored the PR."); }
   };
 
   // AI assist (uses the requesting user's configured model).
@@ -142,6 +153,20 @@ function PRView({ prId, repo, setRoute }) {
               <span key={r.id} className="avatar" style={{ background: r.color, width: 18, height: 18, fontSize: 8, marginLeft: i ? -6 : 0, border: "2px solid var(--bg-1)" }}>{r.initials}</span>
             ))}
             <span style={{ marginLeft: 8 }}>{pr.reviewers.length} requested</span>
+            {pr.status !== "merged" ? (
+              reqOpen ? (
+                <span className="row" style={{ gap: 4, marginLeft: 8 }}>
+                  <input value={reqHandle} onChange={e => setReqHandle(e.target.value)} placeholder="handle"
+                    onKeyDown={e => { if (e.key === "Enter") requestReview(); if (e.key === "Escape") { setReqOpen(false); setReqErr(""); } }}
+                    autoFocus style={{ height: 22, width: 110, padding: "0 6px", border: "1px solid var(--line)", borderRadius: 5, background: "var(--bg-1)", color: "var(--fg)", font: "inherit", fontSize: 11.5 }} />
+                  <button className="btn sm" onClick={requestReview} disabled={!reqHandle.trim()}>Request</button>
+                  <button className="btn ghost sm" onClick={() => { setReqOpen(false); setReqErr(""); }}>✕</button>
+                </span>
+              ) : (
+                <button className="btn ghost sm" style={{ marginLeft: 8, height: 22 }} onClick={() => setReqOpen(true)} title="Request a review">+ Reviewer</button>
+              )
+            ) : null}
+            {reqErr ? <span style={{ marginLeft: 8, fontSize: 11, color: "var(--danger)" }}>{reqErr}</span> : null}
           </span>
         } />
         <Stat icon={<Icons.Diff size={12} />} label="diff" value={

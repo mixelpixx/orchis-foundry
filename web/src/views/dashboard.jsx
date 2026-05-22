@@ -12,12 +12,24 @@ function DashboardView({ setRoute, openPalette, route }) {
   const [showNewRepo, setShowNewRepo] = React.useState(!!(route && route.newRepo));
   const [inbox, setInbox] = React.useState(null);
   const [activity, setActivity] = React.useState(null);
+  const loadInbox = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get("/v1/me/inbox").then(setInbox).catch(() => setInbox([]));
+  }, []);
   React.useEffect(() => {
     if (window.OrchisAPI) {
-      window.OrchisAPI.get("/v1/me/inbox").then(setInbox).catch(() => setInbox([]));
+      loadInbox();
       window.OrchisAPI.get("/v1/me/activity").then(setActivity).catch(() => setActivity([]));
     }
-  }, []);
+  }, [loadInbox]);
+
+  // Realtime: refresh the inbox live when something needs your attention
+  // (e.g. a review request). Subscribes to your own inbox topic via SSE.
+  React.useEffect(() => {
+    if (!window.EventSource) return;
+    const es = new EventSource("/v1/stream?topics=inbox:me");
+    es.addEventListener("inbox.new", loadInbox);
+    return () => es.close();
+  }, [loadInbox]);
   const inboxItems = inbox != null ? inbox : [];
   const activityItems = activity != null ? activity : (window.OrchisAPI ? [] : ACTIVITY);
 

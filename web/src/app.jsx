@@ -97,6 +97,7 @@ function App() {
   if (route.view === "home") view = <DashboardView setRoute={navigate} openPalette={() => setPaletteOpen(true)} route={route} />;
   else if (route.view === "prs") view = <PRsView setRoute={navigate} />;
   else if (route.view === "pr") view = <PRView prId={route.pr} repo={route.repo} setRoute={navigate} />;
+  else if (route.view === "search") view = <SearchView route={route} setRoute={navigate} />;
   else if (route.view === "settings") view = <DevSettingsView route={route} setRoute={navigate} />;
   else if (route.view === "repo") view = <RepoView repoId={route.repo} file={route.file} setRoute={navigate} openSplit={openSplit} splitOpen={splitOpen} splitContent={splitContent} closeSplit={() => setSplitOpen(false)} />;
   else view = <DashboardView setRoute={navigate} openPalette={() => setPaletteOpen(true)} route={route} />;

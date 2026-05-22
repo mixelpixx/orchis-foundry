@@ -2198,8 +2198,7 @@ function Sidebar({
   }, {
     id: "search",
     label: "Search",
-    icon: /*#__PURE__*/React.createElement(Icons.Search, null),
-    kbd: "⌘K"
+    icon: /*#__PURE__*/React.createElement(Icons.Search, null)
   }, {
     id: "settings",
     label: "Developer",
@@ -2264,7 +2263,7 @@ function Sidebar({
     style: sbStyles.nav
   }, navItems.map(item => /*#__PURE__*/React.createElement("button", {
     key: item.id,
-    onClick: () => item.id === "search" ? openPalette() : setRoute({
+    onClick: () => setRoute({
       view: item.id
     }),
     style: {
@@ -2492,12 +2491,24 @@ function DashboardView({
   const [showNewRepo, setShowNewRepo] = React.useState(!!(route && route.newRepo));
   const [inbox, setInbox] = React.useState(null);
   const [activity, setActivity] = React.useState(null);
+  const loadInbox = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get("/v1/me/inbox").then(setInbox).catch(() => setInbox([]));
+  }, []);
   React.useEffect(() => {
     if (window.OrchisAPI) {
-      window.OrchisAPI.get("/v1/me/inbox").then(setInbox).catch(() => setInbox([]));
+      loadInbox();
       window.OrchisAPI.get("/v1/me/activity").then(setActivity).catch(() => setActivity([]));
     }
-  }, []);
+  }, [loadInbox]);
+
+  // Realtime: refresh the inbox live when something needs your attention
+  // (e.g. a review request). Subscribes to your own inbox topic via SSE.
+  React.useEffect(() => {
+    if (!window.EventSource) return;
+    const es = new EventSource("/v1/stream?topics=inbox:me");
+    es.addEventListener("inbox.new", loadInbox);
+    return () => es.close();
+  }, [loadInbox]);
   const inboxItems = inbox != null ? inbox : [];
   const activityItems = activity != null ? activity : window.OrchisAPI ? [] : ACTIVITY;
   return /*#__PURE__*/React.createElement("div", {
@@ -4996,7 +5007,7 @@ function PRView({
     es.onopen = () => setLive(true);
     es.onerror = () => setLive(false);
     const onEvent = () => reload();
-    ["pull.commented", "pull.reviewed", "pull.merged", "check.updated"].forEach(k => es.addEventListener(k, onEvent));
+    ["pull.commented", "pull.reviewed", "pull.merged", "check.updated", "pull.reviewers-changed"].forEach(k => es.addEventListener(k, onEvent));
     return () => {
       es.close();
       setLive(false);
@@ -5041,6 +5052,23 @@ function PRView({
       ...(extra || {})
     }).catch(() => {});
     reload();
+  };
+  const [reqOpen, setReqOpen] = React.useState(false);
+  const [reqHandle, setReqHandle] = React.useState("");
+  const [reqErr, setReqErr] = React.useState("");
+  const requestReview = async () => {
+    if (!base || !reqHandle.trim()) return;
+    setReqErr("");
+    try {
+      await window.OrchisAPI.post(base + "/request-review", {
+        reviewer: reqHandle.trim()
+      });
+      setReqHandle("");
+      setReqOpen(false);
+      reload();
+    } catch (e) {
+      setReqErr("Couldn't request — check the handle exists and you own the repo or authored the PR.");
+    }
   };
 
   // AI assist (uses the requesting user's configured model).
@@ -5222,7 +5250,60 @@ function PRView({
       style: {
         marginLeft: 8
       }
-    }, pr.reviewers.length, " requested"))
+    }, pr.reviewers.length, " requested"), pr.status !== "merged" ? reqOpen ? /*#__PURE__*/React.createElement("span", {
+      className: "row",
+      style: {
+        gap: 4,
+        marginLeft: 8
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      value: reqHandle,
+      onChange: e => setReqHandle(e.target.value),
+      placeholder: "handle",
+      onKeyDown: e => {
+        if (e.key === "Enter") requestReview();
+        if (e.key === "Escape") {
+          setReqOpen(false);
+          setReqErr("");
+        }
+      },
+      autoFocus: true,
+      style: {
+        height: 22,
+        width: 110,
+        padding: "0 6px",
+        border: "1px solid var(--line)",
+        borderRadius: 5,
+        background: "var(--bg-1)",
+        color: "var(--fg)",
+        font: "inherit",
+        fontSize: 11.5
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      className: "btn sm",
+      onClick: requestReview,
+      disabled: !reqHandle.trim()
+    }, "Request"), /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost sm",
+      onClick: () => {
+        setReqOpen(false);
+        setReqErr("");
+      }
+    }, "\u2715")) : /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost sm",
+      style: {
+        marginLeft: 8,
+        height: 22
+      },
+      onClick: () => setReqOpen(true),
+      title: "Request a review"
+    }, "+ Reviewer") : null, reqErr ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 8,
+        fontSize: 11,
+        color: "var(--danger)"
+      }
+    }, reqErr) : null)
   }), /*#__PURE__*/React.createElement(Stat, {
     icon: /*#__PURE__*/React.createElement(Icons.Diff, {
       size: 12
@@ -7891,6 +7972,278 @@ const dsStyles = {
 };
 window.DevSettingsView = DevSettingsView;
 
+// ===== src/views/search.jsx =====
+// Code search view — full-text search across repo contents (git grep backend).
+function SearchView({
+  route,
+  setRoute
+}) {
+  const [q, setQ] = React.useState(route && route.q || "");
+  const [lang, setLang] = React.useState("");
+  const [repo, setRepo] = React.useState(route && route.repo || "");
+  const [hits, setHits] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const inputRef = React.useRef(null);
+  React.useEffect(() => {
+    setTimeout(() => inputRef.current && inputRef.current.focus(), 20);
+  }, []);
+  React.useEffect(() => {
+    if (!window.OrchisAPI || q.trim().length < 2) {
+      setHits(q.trim() ? [] : null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const t = setTimeout(() => {
+      const params = new URLSearchParams({
+        q: q.trim()
+      });
+      if (lang) params.set("lang", lang);
+      if (repo) params.set("repo", repo);
+      window.OrchisAPI.get("/v1/search/code?" + params.toString()).then(res => {
+        if (!cancelled) {
+          setHits(res || []);
+          setLoading(false);
+        }
+      }).catch(() => {
+        if (!cancelled) {
+          setHits([]);
+          setLoading(false);
+        }
+      });
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [q, lang, repo]);
+
+  // Group hits by repo for display.
+  const groups = React.useMemo(() => {
+    const m = new Map();
+    (hits || []).forEach(h => {
+      if (!m.has(h.repo)) m.set(h.repo, []);
+      m.get(h.repo).push(h);
+    });
+    return [...m.entries()].map(([name, items]) => ({
+      name,
+      items
+    }));
+  }, [hits]);
+  const langs = ["", "go", "js", "ts", "py", "rs", "rb", "java", "c", "cpp", "sh", "md", "json", "yaml", "html", "css"];
+  return /*#__PURE__*/React.createElement("div", {
+    style: searchStyles.scroll
+  }, /*#__PURE__*/React.createElement("div", {
+    style: searchStyles.page,
+    className: "fade-in"
+  }, /*#__PURE__*/React.createElement("h1", {
+    style: {
+      fontSize: 22,
+      fontWeight: 500,
+      letterSpacing: "-0.015em",
+      margin: "0 0 4px"
+    }
+  }, "Code search"), /*#__PURE__*/React.createElement("p", {
+    className: "muted",
+    style: {
+      margin: "0 0 16px",
+      fontSize: 13
+    }
+  }, "Literal full-text search across your repositories."), /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      marginBottom: 14,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      flex: 1,
+      minWidth: 240,
+      border: "1px solid var(--line)",
+      borderRadius: 8,
+      padding: "0 10px",
+      background: "var(--bg-1)"
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Search, {
+    size: 15,
+    style: {
+      color: "var(--fg-2)"
+    }
+  }), /*#__PURE__*/React.createElement("input", {
+    ref: inputRef,
+    value: q,
+    onChange: e => setQ(e.target.value),
+    placeholder: "Search code\u2026 (min 2 chars)",
+    style: {
+      flex: 1,
+      border: "none",
+      outline: "none",
+      background: "transparent",
+      color: "var(--fg)",
+      font: "inherit",
+      fontSize: 14,
+      height: 40
+    }
+  })), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: lang,
+    onChange: e => setLang(e.target.value),
+    style: {
+      height: 40
+    }
+  }, langs.map(l => /*#__PURE__*/React.createElement("option", {
+    key: l,
+    value: l
+  }, l === "" ? "Any language" : l))), repo ? /*#__PURE__*/React.createElement("button", {
+    className: "btn sm",
+    onClick: () => setRepo(""),
+    title: "Clear repo filter"
+  }, repo, " \u2715") : null), q.trim().length >= 2 && !loading && groups.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "20px 18px",
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "No matches.") : null, loading ? /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12.5,
+      padding: "4px 2px"
+    }
+  }, "Searching\u2026") : null, groups.map(g => /*#__PURE__*/React.createElement("div", {
+    key: g.name,
+    style: {
+      marginBottom: 18
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 6,
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Repo, {
+    size: 13,
+    style: {
+      color: "var(--fg-2)"
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 12.5,
+      fontWeight: 500
+    }
+  }, g.name), /*#__PURE__*/React.createElement("span", {
+    className: "subtle",
+    style: {
+      fontSize: 11
+    }
+  }, g.items.length, " hit", g.items.length === 1 ? "" : "s")), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      overflow: "hidden"
+    }
+  }, g.items.map((h, i) => /*#__PURE__*/React.createElement("button", {
+    key: i,
+    onClick: () => setRoute({
+      view: "repo",
+      repo: h.repo,
+      file: h.path
+    }),
+    style: {
+      ...searchStyles.hit,
+      borderBottom: i < g.items.length - 1 ? "1px solid var(--line)" : "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mono subtle",
+    style: {
+      fontSize: 11.5,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, h.path), /*#__PURE__*/React.createElement("span", {
+    className: "mono subtle",
+    style: {
+      fontSize: 11,
+      flexShrink: 0
+    }
+  }, ":", h.line)), /*#__PURE__*/React.createElement("code", {
+    style: searchStyles.snippet
+  }, highlight(h.text, q.trim())))))))));
+}
+
+// highlight wraps case-insensitive literal matches of q in the snippet.
+function highlight(text, q) {
+  if (!q) return text;
+  const lower = text.toLowerCase();
+  const ql = q.toLowerCase();
+  const out = [];
+  let i = 0,
+    k = 0;
+  while (i < text.length) {
+    const idx = lower.indexOf(ql, i);
+    if (idx < 0) {
+      out.push(text.slice(i));
+      break;
+    }
+    if (idx > i) out.push(text.slice(i, idx));
+    out.push(/*#__PURE__*/React.createElement("mark", {
+      key: k++,
+      style: {
+        background: "var(--accent-soft)",
+        color: "var(--accent)",
+        borderRadius: 3,
+        padding: "0 1px"
+      }
+    }, text.slice(idx, idx + q.length)));
+    i = idx + q.length;
+  }
+  return out;
+}
+const searchStyles = {
+  scroll: {
+    height: "100%",
+    overflowY: "auto"
+  },
+  page: {
+    maxWidth: 900,
+    margin: "0 auto",
+    padding: "28px 24px 60px"
+  },
+  hit: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    width: "100%",
+    textAlign: "left",
+    padding: "9px 12px",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    font: "inherit",
+    color: "inherit"
+  },
+  snippet: {
+    fontFamily: "var(--font-mono)",
+    fontSize: 12,
+    color: "var(--fg-1)",
+    whiteSpace: "pre",
+    overflow: "hidden",
+    textOverflow: "ellipsis"
+  }
+};
+window.SearchView = SearchView;
+
 // ===== src/app.jsx =====
 // Main app — shell, routing, command palette, tweaks.
 
@@ -8037,6 +8390,9 @@ function App() {
   });else if (route.view === "pr") view = /*#__PURE__*/React.createElement(PRView, {
     prId: route.pr,
     repo: route.repo,
+    setRoute: navigate
+  });else if (route.view === "search") view = /*#__PURE__*/React.createElement(SearchView, {
+    route: route,
     setRoute: navigate
   });else if (route.view === "settings") view = /*#__PURE__*/React.createElement(DevSettingsView, {
     route: route,

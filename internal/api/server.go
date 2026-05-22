@@ -103,8 +103,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/me/activity", s.requireUser(s.handleActivity))
 		r.Get("/me/inbox", s.requireUser(s.handleInbox))
 
-		// Search (command palette)
+		// Search (command palette + code search)
 		r.Get("/search/palette", s.requireUser(s.handlePaletteSearch))
+		r.Get("/search/code", s.requireUser(s.handleCodeSearch))
 
 		// Realtime stream (SSE)
 		r.Get("/stream", s.requireUser(s.handleStream))
@@ -159,6 +160,8 @@ func (s *Server) Router() http.Handler {
 		r.Post("/repos/{org}/{name}/pulls/{num}/comments", s.requireScope("repo:write", s.handleCreateComment))
 		r.Post("/repos/{org}/{name}/pulls/{num}/reviews", s.requireScope("repo:write", s.handleSubmitReview))
 		r.Post("/repos/{org}/{name}/pulls/{num}/merge", s.requireScope("repo:write", s.handleMerge))
+		r.Post("/repos/{org}/{name}/pulls/{num}/request-review", s.requireScope("repo:write", s.handleRequestReview))
+		r.Delete("/repos/{org}/{name}/pulls/{num}/request-review/{handle}", s.requireScope("repo:write", s.handleRemoveReviewer))
 	})
 
 	// Everything else serves the frontend (SPA-style: unknown paths → index.html).

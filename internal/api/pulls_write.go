@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/orchis-ai/foundry/internal/auth"
 )
 
 // POST /v1/repos/:org/:name/pulls/:num/comments
@@ -201,6 +203,99 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 		"number": num, "repo": row.OwnerHandle + "/" + row.Name, "merged_by": u.Handle,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"merged": true, "strategy": in.Strategy})
+}
+
+// canManageReviewers reports whether u may add/remove reviewers on a pull:
+// the repo owner or the PR author.
+func (s *Server) canManageReviewers(r *http.Request, row *repoRow, pullID int64, u *auth.User) bool {
+	if u == nil {
+		return false
+	}
+	if row.OwnerUserID.Valid && row.OwnerUserID.Int64 == u.ID {
+		return true
+	}
+	var authorID int64
+	s.db.QueryRowContext(r.Context(), `SELECT author_id FROM pulls WHERE id = ?`, pullID).Scan(&authorID)
+	return authorID == u.ID
+}
+
+// POST /v1/repos/:org/:name/pulls/:num/request-review { reviewer: "<handle>" }
+func (s *Server) handleRequestReview(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.loadRepo(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	num, _ := strconv.Atoi(chi.URLParam(r, "num"))
+	pullID, found := s.pullIDByNumber(row.ID, num)
+	if !found {
+		writeError(w, http.StatusNotFound, "pull request not found")
+		return
+	}
+	u := userFrom(r)
+	if !s.canManageReviewers(r, row, pullID, u) {
+		writeError(w, http.StatusForbidden, "only the repo owner or PR author can request reviews")
+		return
+	}
+	var in struct {
+		Reviewer string `json:"reviewer"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || strings.TrimSpace(in.Reviewer) == "" {
+		writeError(w, http.StatusBadRequest, "reviewer handle required")
+		return
+	}
+	var reviewerID int64
+	if err := s.db.QueryRowContext(r.Context(), `SELECT id FROM users WHERE handle = ?`, strings.TrimSpace(in.Reviewer)).Scan(&reviewerID); err != nil {
+		writeError(w, http.StatusNotFound, "no such user: "+in.Reviewer)
+		return
+	}
+	if _, err := s.db.ExecContext(r.Context(),
+		`INSERT INTO pull_reviewers (pull_id, user_id) VALUES (?,?) ON CONFLICT DO NOTHING`, pullID, reviewerID); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not request review")
+		return
+	}
+	s.db.ExecContext(r.Context(), `UPDATE pulls SET updated_at = datetime('now') WHERE id = ?`, pullID)
+
+	// Live: the reviewer's dashboard inbox + the PR's reviewer chips.
+	repo := row.OwnerHandle + "/" + row.Name
+	var title string
+	var adds, dels int
+	s.db.QueryRowContext(r.Context(), `SELECT title, additions, deletions FROM pulls WHERE id = ?`, pullID).Scan(&title, &adds, &dels)
+	s.publish("inbox:"+strconv.FormatInt(reviewerID, 10), "inbox.new", map[string]any{
+		"icon": "pr", "kind": "accent", "title": "Review requested",
+		"repo": repo, "detail": "#" + strconv.Itoa(num) + " " + title,
+		"meta":  []map[string]any{{"label": "+" + strconv.Itoa(adds) + " −" + strconv.Itoa(dels), "mono": true}},
+		"cta":   "Open review", "route": map[string]any{"view": "pr", "pr": num, "repo": repo},
+	})
+	s.publish(pullTopic(row.OwnerHandle, row.Name, num), "pull.reviewers-changed", map[string]any{"number": num, "repo": repo})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "reviewer": in.Reviewer})
+}
+
+// DELETE /v1/repos/:org/:name/pulls/:num/request-review/{handle}
+func (s *Server) handleRemoveReviewer(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.loadRepo(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	num, _ := strconv.Atoi(chi.URLParam(r, "num"))
+	pullID, found := s.pullIDByNumber(row.ID, num)
+	if !found {
+		writeError(w, http.StatusNotFound, "pull request not found")
+		return
+	}
+	u := userFrom(r)
+	if !s.canManageReviewers(r, row, pullID, u) {
+		writeError(w, http.StatusForbidden, "only the repo owner or PR author can manage reviewers")
+		return
+	}
+	handle := chi.URLParam(r, "handle")
+	var reviewerID int64
+	if s.db.QueryRowContext(r.Context(), `SELECT id FROM users WHERE handle = ?`, handle).Scan(&reviewerID) == nil {
+		s.db.ExecContext(r.Context(), `DELETE FROM pull_reviewers WHERE pull_id = ? AND user_id = ?`, pullID, reviewerID)
+		s.publish(pullTopic(row.OwnerHandle, row.Name, num), "pull.reviewers-changed", map[string]any{"number": num, "repo": row.OwnerHandle + "/" + row.Name})
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // mergeBranches performs the merge in a throwaway worktree of the bare repo.

@@ -32,7 +32,16 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	var allowed []string
 	for _, t := range strings.Split(r.URL.Query().Get("topics"), ",") {
 		t = strings.TrimSpace(t)
-		if t != "" && s.canSubscribe(u, t) {
+		if t == "" {
+			continue
+		}
+		// Convenience: "inbox:me" resolves to the authenticated user's numeric
+		// inbox topic (the frontend never sees the numeric id). Publishers emit
+		// to "inbox:<id>", so we register the subscription under that.
+		if t == "inbox:me" {
+			t = "inbox:" + strconv.FormatInt(u.ID, 10)
+		}
+		if s.canSubscribe(u, t) {
 			allowed = append(allowed, t)
 		}
 	}

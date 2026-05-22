@@ -3,7 +3,7 @@ function Sidebar({ route, setRoute, openPalette, openTokens, theme, setTheme }) 
   const navItems = [
     { id: "home", label: "Home", icon: <Icons.Home /> },
     { id: "prs", label: "Pull requests", icon: <Icons.PR />, badge: 3 },
-    { id: "search", label: "Search", icon: <Icons.Search />, kbd: "⌘K" },
+    { id: "search", label: "Search", icon: <Icons.Search /> },
     { id: "settings", label: "Developer", icon: <Icons.Key /> },
   ];
 
@@ -46,7 +46,7 @@ function Sidebar({ route, setRoute, openPalette, openTokens, theme, setTheme }) 
         {navItems.map(item => (
           <button
             key={item.id}
-            onClick={() => item.id === "search" ? openPalette() : setRoute({ view: item.id })}
+            onClick={() => setRoute({ view: item.id })}
             style={{
               ...sbStyles.navItem,
               ...((route.view === item.id) ? sbStyles.navItemActive : {}),
