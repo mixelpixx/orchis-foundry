@@ -106,6 +106,8 @@ func (s *Server) Router() http.Handler {
 		// Search (command palette + code search)
 		r.Get("/search/palette", s.requireUser(s.handlePaletteSearch))
 		r.Get("/search/code", s.requireUser(s.handleCodeSearch))
+		r.Get("/search/repos", s.requireUser(s.handleSearchRepos))
+		r.Get("/search/users", s.requireUser(s.handleSearchUsers))
 
 		// Realtime stream (SSE)
 		r.Get("/stream", s.requireUser(s.handleStream))

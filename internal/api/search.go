@@ -126,6 +126,37 @@ func (s *Server) handleCodeSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// GET /v1/search/repos?q= — repos matching the query (reuses palette logic).
+func (s *Server) handleSearchRepos(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	writeJSON(w, http.StatusOK, s.searchRepos(r, u.ID, q))
+}
+
+// GET /v1/search/users?q= — users matching handle or name.
+func (s *Server) handleSearchUsers(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	like := "%" + q + "%"
+	rows, err := s.db.QueryContext(r.Context(),
+		`SELECT handle, name FROM users
+		 WHERE ? = '' OR handle LIKE ? OR name LIKE ?
+		 ORDER BY handle LIMIT 10`, q, like, like)
+	out := []map[string]any{}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var handle, name string
+			if rows.Scan(&handle, &name) == nil {
+				out = append(out, map[string]any{
+					"id": handle, "handle": handle, "name": name,
+					"initials": initials(name, handle), "color": colorFor(handle),
+				})
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // grepInto runs one repo's grep and appends shaped hits to out, respecting the
 // overall hit cap.
 func (s *Server) grepInto(ctx context.Context, out *[]map[string]any, repoID int64, label, sha, ref, q string, pathspecs []string) {

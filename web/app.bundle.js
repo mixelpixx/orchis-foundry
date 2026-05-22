@@ -1940,8 +1940,21 @@ function Palette({
         };
       }).filter(Boolean).sort((a, b) => a._score - b._score);
     }
-    return [...statics, ...serverActions].slice(0, 40);
-  }, [q, staticActions, serverActions]);
+    // When there's a query, always offer a "search code" escape hatch that
+    // opens the full code-search view pre-filled with the query.
+    const codeAction = q.trim() ? [{
+      id: "act-code-search",
+      group: "Quick action",
+      icon: /*#__PURE__*/React.createElement(Icons.Search, null),
+      label: "Search code for “" + q.trim() + "”",
+      kbd: "↵",
+      run: () => onNavigate({
+        view: "search",
+        q: q.trim()
+      })
+    }] : [];
+    return [...codeAction, ...statics, ...serverActions].slice(0, 40);
+  }, [q, staticActions, serverActions, onNavigate]);
 
   // Group rendering
   const groups = React.useMemo(() => {
