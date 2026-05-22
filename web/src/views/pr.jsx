@@ -166,7 +166,7 @@ function PRView({ prId, repo, setRoute }) {
       </div>
 
       <div style={prStyles.body}>
-        {tab === "files" ? <FilesChanged files={files != null ? files : PR_DIFF_FILES} openComment={openComment} setOpenComment={setOpenComment} draftComments={draftComments} setDraftComments={setDraftComments} /> : null}
+        {tab === "files" ? <FilesChanged files={files != null ? files : PR_DIFF_FILES} openComment={openComment} setOpenComment={setOpenComment} postComment={postComment} canComment={!!base} /> : null}
         {tab === "conversation" ? <Conversation pr={pr} comments={comments} postComment={postComment} /> : null}
         {tab === "commits" ? <CommitsList commits={commits} /> : null}
         {tab === "checks" ? <ChecksList checks={checks} /> : null}
@@ -209,22 +209,38 @@ function Stat({ icon, label, value, good }) {
   );
 }
 
-function FilesChanged({ files, openComment, setOpenComment, draftComments, setDraftComments }) {
+function FilesChanged({ files, openComment, setOpenComment, postComment, canComment }) {
   return (
     <div style={{ padding: "16px 20px 40px", maxWidth: 1100, margin: "0 auto" }}>
       {files.map((f, fi) => (
-        <FileDiff key={f.path} file={f} fi={fi} openComment={openComment} setOpenComment={setOpenComment} draftComments={draftComments} setDraftComments={setDraftComments} />
+        <FileDiff key={f.path} file={f} fi={fi} openComment={openComment} setOpenComment={setOpenComment} postComment={postComment} canComment={canComment} />
       ))}
     </div>
   );
 }
 
-function FileDiff({ file, fi, openComment, setOpenComment, draftComments, setDraftComments }) {
-  const [collapsed, setCollapsed] = React.useState(false);
+// anchorFor maps a diff line to the (line, side) a comment should attach to:
+// added/context lines anchor to the right (new) side; deleted lines to the
+// left (old) side. Returns null for lines with no usable line number.
+function anchorFor(ln) {
+  const oldN = parseInt(ln.num[0], 10);
+  const newN = parseInt(ln.num[1], 10);
+  if (ln.type === "del") return Number.isNaN(oldN) ? null : { line: oldN, side: "left" };
+  return Number.isNaN(newN) ? null : { line: newN, side: "right" };
+}
 
-  const submitComment = (lineKey) => {
-    // Just close; in real app would persist
-    setOpenComment(null);
+function FileDiff({ file, fi, openComment, setOpenComment, postComment, canComment }) {
+  const [collapsed, setCollapsed] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+
+  const submitComment = async (ln, body) => {
+    const a = anchorFor(ln);
+    if (!a || !body.trim()) { setOpenComment(null); return; }
+    setBusy(true);
+    try {
+      await postComment(body.trim(), { path: file.path, line: a.line, side: a.side });
+      setOpenComment(null);
+    } finally { setBusy(false); }
   };
 
   return (
@@ -247,16 +263,15 @@ function FileDiff({ file, fi, openComment, setOpenComment, draftComments, setDra
               <div style={prStyles.hunkHead}><span className="mono" style={{ fontSize: 11.5, color: "var(--fg-2)" }}>{h.header}</span></div>
               {h.lines.map((ln, li) => {
                 const lineKey = `${fi}-${hi}-${li}`;
-                const inlineComments = (file.comments || []).filter(c => {
-                  // Match comments against the right-side new line if we have one
-                  return ln.type === "add" && c.line === parseInt(ln.num[1], 10);
-                });
+                const a = anchorFor(ln);
+                const inlineComments = (file.comments || []).filter(c =>
+                  a && c.line === a.line && (c.side || "right") === a.side);
                 return (
                   <React.Fragment key={li}>
-                    <DiffLine ln={ln} onComment={() => setOpenComment(lineKey)} />
-                    {inlineComments.map(c => <InlineComment key={c.author.id + c.when} c={c} />)}
+                    <DiffLine ln={ln} canComment={canComment && !!a} onComment={() => setOpenComment(lineKey)} />
+                    {inlineComments.map((c, ci) => <InlineComment key={ci} c={c} />)}
                     {openComment === lineKey ? (
-                      <NewCommentBox onCancel={() => setOpenComment(null)} onSubmit={() => submitComment(lineKey)} />
+                      <NewCommentBox busy={busy} onCancel={() => setOpenComment(null)} onSubmit={(body) => submitComment(ln, body)} />
                     ) : null}
                   </React.Fragment>
                 );
@@ -269,7 +284,7 @@ function FileDiff({ file, fi, openComment, setOpenComment, draftComments, setDra
   );
 }
 
-function DiffLine({ ln, onComment }) {
+function DiffLine({ ln, onComment, canComment }) {
   const bg = ln.type === "add" ? "color-mix(in oklab, var(--accent) 10%, var(--bg))"
     : ln.type === "del" ? "color-mix(in oklab, var(--danger) 10%, var(--bg))"
     : "transparent";
@@ -280,9 +295,11 @@ function DiffLine({ ln, onComment }) {
     <div style={{ ...prStyles.diffLine, background: bg }} className="diff-line">
       <span style={prStyles.diffNum}>{ln.num[0]}</span>
       <span style={prStyles.diffNum}>{ln.num[1]}</span>
-      <button style={prStyles.diffAdd} onClick={onComment} title="Add comment">
-        <Icons.Plus size={10} />
-      </button>
+      {canComment ? (
+        <button style={prStyles.diffAdd} onClick={onComment} title="Add a comment on this line">
+          <Icons.Plus size={10} />
+        </button>
+      ) : <span style={{ width: 18 }} />}
       <span style={{ width: 16, textAlign: "center", color: markerColor, fontFamily: "var(--font-mono)" }}>{marker}</span>
       <code style={prStyles.diffCode}>{ln.text}</code>
     </div>
@@ -296,23 +313,22 @@ function InlineComment({ c }) {
         <span className="avatar" style={{ background: c.author.color, width: 20, height: 20, fontSize: 9 }}>{c.author.initials}</span>
         <span style={{ fontSize: 12.5, fontWeight: 500 }}>{c.author.name}</span>
         <span className="subtle" style={{ fontSize: 11.5 }}>{c.when}</span>
+        {c.side ? <span className="mono subtle" style={{ fontSize: 10.5 }}>· {c.side === "left" ? "old" : "new"} L{c.line}</span> : null}
       </div>
-      <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--fg-1)" }}>{c.body}</div>
-      <div className="row" style={{ gap: 6, marginTop: 10 }}>
-        <button className="btn sm">Reply</button>
-        <button className="btn sm">Resolve</button>
-      </div>
+      <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--fg-1)", whiteSpace: "pre-wrap" }}>{c.body}</div>
     </div>
   );
 }
 
-function NewCommentBox({ onCancel, onSubmit }) {
+function NewCommentBox({ onCancel, onSubmit, busy }) {
   const [v, setV] = React.useState("");
+  const submit = () => { if (v.trim()) onSubmit(v); };
   return (
     <div style={prStyles.inlineComment}>
       <textarea
         value={v}
         onChange={e => setV(e.target.value)}
+        onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); } }}
         placeholder="Leave a comment… ⌘+Enter to submit"
         style={{
           width: "100%", minHeight: 76, padding: "8px 10px",
@@ -326,8 +342,7 @@ function NewCommentBox({ onCancel, onSubmit }) {
       <div className="row" style={{ gap: 6, marginTop: 8 }}>
         <button className="btn sm" onClick={onCancel}>Cancel</button>
         <span className="spacer" />
-        <button className="btn sm">Start a review</button>
-        <button className="btn primary sm" onClick={onSubmit}>Comment</button>
+        <button className="btn primary sm" onClick={submit} disabled={!v.trim() || busy}>{busy ? "Posting…" : "Comment"}</button>
       </div>
     </div>
   );
