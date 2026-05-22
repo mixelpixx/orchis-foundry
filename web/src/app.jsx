@@ -30,10 +30,41 @@ function App() {
   const [splitOpen, setSplitOpen] = React.useState(true);
   const [splitContent, setSplitContent] = React.useState({ type: "prs", repo: "kelp/atlas" });
 
+  // Server-side preferences: hydrate once on mount, then persist changes.
+  const hydratingPrefs = React.useRef(false);
+  const savePrefs = React.useCallback((partial) => {
+    if (window.OrchisAPI && !hydratingPrefs.current) {
+      window.OrchisAPI.patch("/v1/me/preferences", partial).catch(() => {});
+    }
+  }, []);
+
   const setTheme = (v) => {
     setThemeState(v);
     localStorage.setItem("orchis-theme", v);
+    savePrefs({ theme: v });
   };
+
+  // On load, pull saved preferences and apply them (without re-saving).
+  React.useEffect(() => {
+    if (!window.OrchisAPI) return;
+    window.OrchisAPI.get("/v1/me/preferences").then((p) => {
+      if (!p || typeof p !== "object") return;
+      hydratingPrefs.current = true;
+      if (p.theme === "light" || p.theme === "dark") { setThemeState(p.theme); localStorage.setItem("orchis-theme", p.theme); }
+      const tw = {};
+      ["accent", "density", "font"].forEach((k) => { if (p[k] != null) tw[k] = p[k]; });
+      if (typeof p.showSplitTip === "boolean") tw.showSplitTip = p.showSplitTip;
+      if (Object.keys(tw).length) setTweak(tw);
+      setTimeout(() => { hydratingPrefs.current = false; }, 0);
+    }).catch(() => {});
+  }, []);
+
+  // Persist tweak changes (accent/density/font/showSplitTip) to the account.
+  React.useEffect(() => {
+    const onTweak = (e) => savePrefs(e.detail || {});
+    window.addEventListener("tweakchange", onTweak);
+    return () => window.removeEventListener("tweakchange", onTweak);
+  }, [savePrefs]);
 
   // Apply theme + density + accent to document
   React.useEffect(() => {

@@ -38,6 +38,10 @@
       "delete": { "summary": "Unstar a repo", "responses": { "204": { "description": "Unstarred" } } }
     },
     "/users/{handle}": { "get": { "summary": "Public user profile (identity + public repos)", "parameters": [{ "name": "handle", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "{handle,name,bio,avatarUrl,memberSince,repos}" }, "404": { "description": "not found" } } } },
+    "/me/preferences": {
+      "get": { "summary": "Get your UI preferences", "responses": { "200": { "description": "{theme,accent,density,font,showSplitTip}" } } },
+      "patch": { "summary": "Update UI preferences (merged; validated allowlist)", "responses": { "200": { "description": "preferences" } } }
+    },
     "/me/scanner": {
       "get": { "summary": "Get scanner / model config (key masked)", "responses": { "200": { "description": "ScannerSettings" } } },
       "put": { "summary": "Update scanner / model config", "responses": { "200": { "description": "ScannerSettings" } } }

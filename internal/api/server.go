@@ -76,6 +76,8 @@ func (s *Server) Router() http.Handler {
 		r.Post("/auth/logout", s.handleLogout)
 		r.Get("/me", s.handleMe)
 		r.Patch("/me", s.requireUser(s.handlePatchMe))
+		r.Get("/me/preferences", s.requireUser(s.handleGetPreferences))
+		r.Patch("/me/preferences", s.requireUser(s.handlePatchPreferences))
 
 		// Personal access tokens
 		r.Get("/me/tokens", s.requireUser(s.handleListTokens))
