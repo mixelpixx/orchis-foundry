@@ -158,6 +158,7 @@ func (s *Server) handleCreateRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.installPushHook(id)
+	s.logActivity(r.Context(), u.ID, "repo_created", id, u.Handle+"/"+in.Name, in.Name)
 
 	row := &repoRow{
 		ID: id, OwnerUserID: sql.NullInt64{Int64: u.ID, Valid: true}, OwnerHandle: u.Handle,

@@ -29,7 +29,15 @@ func Open(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	d.SetMaxOpenConns(1) // SQLite + WAL: single writer; keeps it simple and correct.
+	// Pool of connections. WAL allows concurrent readers; SQLite serializes
+	// writers at the file level and busy_timeout (set in the DSN) makes a
+	// blocked writer wait rather than error. A pool >1 is required because
+	// several handlers run nested queries inside an open rows cursor (e.g.
+	// listing PRs resolves each summary; activity resolves each actor) — with
+	// a single connection those would deadlock waiting for the cursor's conn.
+	d.SetMaxOpenConns(8)
+	d.SetMaxIdleConns(8)
+	d.SetConnMaxLifetime(0)
 	if err := d.Ping(); err != nil {
 		return nil, err
 	}

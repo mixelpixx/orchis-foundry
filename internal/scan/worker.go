@@ -150,6 +150,19 @@ func (w *Worker) process(ctx context.Context, jobID, pullID, repoID int64, sha s
 	}
 	w.upsertCheck(repoID, sha, status, summarize(res))
 	w.db.Exec(`UPDATE scan_jobs SET status='done', finished_at=datetime('now') WHERE id=?`, jobID)
+
+	// Feed event when the scan flags something.
+	if res.Overall != "clean" && len(res.Findings) > 0 {
+		var owner, name string
+		var num int
+		if err := w.db.QueryRow(
+			`SELECT uo.handle, rp.name, p.number FROM pulls p
+			 JOIN repos rp ON rp.id = p.repo_id JOIN users uo ON uo.id = rp.owner_user_id
+			 WHERE p.id = ?`, pullID).Scan(&owner, &name, &num); err == nil {
+			w.db.Exec(`INSERT INTO activity (actor_id, kind, repo_id, target, title) VALUES (NULL,'scan_flagged',?,?,?)`,
+				repoID, fmt.Sprintf("%s/%s#%d", owner, name, num), fmt.Sprintf("%s — %d finding(s)", res.Overall, len(res.Findings)))
+		}
+	}
 	w.log.Info("scan complete", "job", jobID, "overall", res.Overall, "findings", len(res.Findings))
 }
 

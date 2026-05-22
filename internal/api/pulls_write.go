@@ -60,6 +60,7 @@ func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	s.db.ExecContext(r.Context(), `UPDATE pulls SET updated_at = datetime('now') WHERE id = ?`, pullID)
 	id, _ := res.LastInsertId()
+	s.logActivity(r.Context(), u.ID, "pr_commented", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(num), in.Body)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": id, "author": s.userBrief(u.ID), "body": in.Body,
 		"path": in.Path, "line": in.Line, "side": in.Side, "when": "just now",
@@ -124,6 +125,7 @@ func (s *Server) handleSubmitReview(w http.ResponseWriter, r *http.Request) {
 			pullID, u.ID, c.Body, pathVal, lineVal, side)
 	}
 	s.db.ExecContext(r.Context(), `UPDATE pulls SET updated_at = datetime('now') WHERE id = ?`, pullID)
+	s.logActivity(r.Context(), u.ID, "pr_reviewed", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(num), in.Verdict)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verdict": in.Verdict})
 }
 
@@ -158,9 +160,9 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 		in.Strategy = "merge"
 	}
 
-	var head, base, state string
-	s.db.QueryRowContext(r.Context(), `SELECT head_branch, base_branch, state FROM pulls WHERE id = ?`, pullID).
-		Scan(&head, &base, &state)
+	var head, base, state, prTitle string
+	s.db.QueryRowContext(r.Context(), `SELECT title, head_branch, base_branch, state FROM pulls WHERE id = ?`, pullID).
+		Scan(&prTitle, &head, &base, &state)
 	if state != "open" {
 		writeError(w, http.StatusConflict, "pull request is not open")
 		return
@@ -182,6 +184,7 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 
 	s.db.ExecContext(r.Context(), `UPDATE pulls SET state='merged', updated_at=datetime('now') WHERE id = ?`, pullID)
 	s.db.ExecContext(r.Context(), `UPDATE repos SET pushed_at=datetime('now') WHERE id = ?`, row.ID)
+	s.logActivity(r.Context(), u.ID, "pr_merged", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(num), prTitle)
 	writeJSON(w, http.StatusOK, map[string]any{"merged": true, "strategy": in.Strategy})
 }
 

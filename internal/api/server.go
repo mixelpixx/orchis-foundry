@@ -87,6 +87,10 @@ func (s *Server) Router() http.Handler {
 		r.Get("/me/scanner", s.requireUser(s.handleGetScanner))
 		r.Put("/me/scanner", s.requireUser(s.handlePutScanner))
 
+		// Dashboard
+		r.Get("/me/activity", s.requireUser(s.handleActivity))
+		r.Get("/me/inbox", s.requireUser(s.handleInbox))
+
 		// Repositories
 		r.Get("/repos", s.requireUser(s.handleListRepos))
 		r.Post("/repos", s.requireScope("repo:admin", s.handleCreateRepo))

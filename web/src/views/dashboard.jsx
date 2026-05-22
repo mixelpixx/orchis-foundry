@@ -1,9 +1,25 @@
 // Dashboard / home view.
+function inboxIcon(name) {
+  if (name === "pr") return <Icons.PR />;
+  if (name === "key") return <Icons.Key />;
+  if (name === "alert") return <Icons.Issue />;
+  return <Icons.Issue />;
+}
+
 function DashboardView({ setRoute, openPalette }) {
-  const myPRs = PRS.filter(p => p.reviewers.some(r => r.id === "me") || p.author.id === "me");
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   const firstName = (USERS.me.name || USERS.me.handle || "there").split(" ")[0];
   const [showNewRepo, setShowNewRepo] = React.useState(false);
+  const [inbox, setInbox] = React.useState(null);
+  const [activity, setActivity] = React.useState(null);
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get("/v1/me/inbox").then(setInbox).catch(() => setInbox([]));
+      window.OrchisAPI.get("/v1/me/activity").then(setActivity).catch(() => setActivity([]));
+    }
+  }, []);
+  const inboxItems = inbox != null ? inbox : [];
+  const activityItems = activity != null ? activity : (window.OrchisAPI ? [] : ACTIVITY);
 
   return (
     <div style={dashStyles.scroll}>
@@ -24,44 +40,33 @@ function DashboardView({ setRoute, openPalette }) {
 
         {showNewRepo ? <NewRepoModal onClose={() => setShowNewRepo(false)} setRoute={setRoute} /> : null}
 
-        {/* Inbox — the 3 things */}
+        {/* Inbox — things that need you */}
         <section style={dashStyles.section}>
           <div style={dashStyles.sectionHead}>
             <h2 style={dashStyles.h2}>Inbox</h2>
             <span className="muted" style={{ fontSize: 12 }}>Filtered to what actually needs you.</span>
           </div>
-          <div style={dashStyles.inbox}>
-            <InboxCard
-              icon={<Icons.PR />}
-              kind="accent"
-              title="Review requested"
-              repo="kelp/atlas"
-              detail="#842 router: switch fallback sink to bounded channel"
-              meta={[{ label: "by Jana", avatar: USERS.jana }, { label: "+142 -88", mono: true }, { label: "8 min ago" }]}
-              cta="Open review"
-              onClick={() => setRoute({ view: "pr", pr: 842 })}
-            />
-            <InboxCard
-              icon={<Icons.Key />}
-              kind="warn"
-              title="Token expires in 14 days"
-              repo="ci pipeline"
-              detail="Rotate before it expires, or CI will stall."
-              meta={[{ label: "scopes: repo:read, packages:write", mono: true }]}
-              cta="Rotate token"
-              onClick={() => setRoute({ view: "settings", tab: "tokens" })}
-            />
-            <InboxCard
-              icon={<Icons.Issue />}
-              kind="info"
-              title="Mentioned in an issue"
-              repo="kelp/atlas"
-              detail="#911 Memory growth under fallback-only routing"
-              meta={[{ label: "by Noor", avatar: USERS.noor }, { label: "yesterday" }]}
-              cta="View issue"
-              onClick={() => {}}
-            />
-          </div>
+          {inboxItems.length === 0 ? (
+            <div className="card" style={{ padding: "20px 18px", color: "var(--fg-3)", fontSize: 13 }}>
+              Nothing needs your attention right now.
+            </div>
+          ) : (
+            <div style={dashStyles.inbox}>
+              {inboxItems.map((it, i) => (
+                <InboxCard
+                  key={i}
+                  icon={inboxIcon(it.icon)}
+                  kind={it.kind}
+                  title={it.title}
+                  repo={it.repo}
+                  detail={it.detail}
+                  meta={it.meta || []}
+                  cta={it.cta}
+                  onClick={() => it.route && setRoute(it.route)}
+                />
+              ))}
+            </div>
+          )}
         </section>
 
         {/* Two columns */}
@@ -97,8 +102,11 @@ function DashboardView({ setRoute, openPalette }) {
               <h2 style={dashStyles.h2}>Activity</h2>
               <span className="muted" style={{ fontSize: 12 }}>Across all your repos</span>
             </div>
+            {activityItems.length === 0 ? (
+              <div className="card" style={{ padding: "20px 18px", color: "var(--fg-3)", fontSize: 13 }}>No activity yet.</div>
+            ) : (
             <div className="card" style={{ padding: 4 }}>
-              {ACTIVITY.map(a => (
+              {activityItems.map(a => (
                 <div key={a.id} style={dashStyles.activityRow}>
                   <span className="avatar" style={{ background: a.actor.color, width: 20, height: 20, fontSize: 9 }}>{a.actor.initials}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -113,6 +121,7 @@ function DashboardView({ setRoute, openPalette }) {
                 </div>
               ))}
             </div>
+            )}
           </section>
         </div>
       </div>
@@ -122,12 +131,19 @@ function DashboardView({ setRoute, openPalette }) {
 
 function activityVerb(k) {
   switch (k) {
+    case "repo_created": return "created";
+    case "pr_opened": return "opened";
+    case "pr_merged": return "merged";
+    case "pr_reviewed": return "reviewed";
+    case "pr_commented": return "commented on";
+    case "scan_flagged": return "flagged";
+    // legacy mock kinds
     case "pr_review_requested": return "requested your review on";
     case "pr_approved": return "approved";
     case "commit": return "pushed to";
     case "issue_assigned": return "assigned you to";
     case "deploy": return "deployed";
-    default: return "did something in";
+    default: return "updated";
   }
 }
 

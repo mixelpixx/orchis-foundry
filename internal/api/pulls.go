@@ -224,6 +224,7 @@ func (s *Server) handleCreatePull(w http.ResponseWriter, r *http.Request) {
 	if s.scan != nil {
 		s.scan.Enqueue(id, row.ID, headSHA)
 	}
+	s.logActivity(r.Context(), u.ID, "pr_opened", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(number), in.Title)
 	writeJSON(w, http.StatusOK, s.pullSummary(r, id))
 }
 
