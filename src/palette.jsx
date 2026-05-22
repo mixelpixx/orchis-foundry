@@ -11,15 +11,18 @@ function Palette({ open, onClose, onNavigate }) {
     }
   }, [open]);
 
-  // Actions library — buried-feature-friendly
-  const allActions = React.useMemo(() => {
+  // Live search results from the server (repos / pulls / files).
+  const [hits, setHits] = React.useState({ repos: [], pulls: [], files: [] });
+
+  // Static actions — quick actions + navigation. These need local navigation
+  // callbacks, so they're built client-side (the server supplies only data).
+  const staticActions = React.useMemo(() => {
     const acts = [];
     // Quick actions (the killers — 1 step to PAT/SSH/webhook)
     acts.push({ id: "act-pat", group: "Quick action", icon: <Icons.Key />, label: "Create personal access token", hint: "PAT", kbd: "⌘T", run: () => onNavigate({ view: "settings", tab: "tokens", newToken: true }) });
-    acts.push({ id: "act-ssh", group: "Quick action", icon: <Icons.Key />, label: "Add SSH key", run: () => onNavigate({ view: "settings", tab: "ssh", newKey: true }) });
+    acts.push({ id: "act-ssh", group: "Quick action", icon: <Icons.Key />, label: "Add SSH key", hint: "SSH", run: () => onNavigate({ view: "settings", tab: "ssh", newKey: true }) });
     acts.push({ id: "act-wh", group: "Quick action", icon: <Icons.Webhook />, label: "Add webhook", run: () => onNavigate({ view: "settings", tab: "webhooks", newHook: true }) });
-    acts.push({ id: "act-new-repo", group: "Quick action", icon: <Icons.Plus />, label: "New repository", kbd: "⌘N", run: () => {} });
-    acts.push({ id: "act-clone", group: "Quick action", icon: <Icons.Copy />, label: "Copy clone URL — kelp/atlas", run: () => navigator.clipboard?.writeText("git@orchis.kelp.dev:kelp/atlas.git").catch(()=>{}) });
+    acts.push({ id: "act-new-repo", group: "Quick action", icon: <Icons.Plus />, label: "New repository", kbd: "⌘N", run: () => onNavigate({ view: "home", newRepo: true }) });
 
     // Navigation
     acts.push({ id: "nav-home", group: "Go to", icon: <Icons.Home />, label: "Home", run: () => onNavigate({ view: "home" }) });
@@ -28,44 +31,58 @@ function Palette({ open, onClose, onNavigate }) {
     acts.push({ id: "nav-tokens", group: "Go to", icon: <Icons.Key />, label: "Tokens", run: () => onNavigate({ view: "settings", tab: "tokens" }) });
     acts.push({ id: "nav-ssh", group: "Go to", icon: <Icons.Key />, label: "SSH keys", run: () => onNavigate({ view: "settings", tab: "ssh" }) });
     acts.push({ id: "nav-wh", group: "Go to", icon: <Icons.Webhook />, label: "Webhooks", run: () => onNavigate({ view: "settings", tab: "webhooks" }) });
-
-    // Repos
-    REPOS.forEach(r => {
-      acts.push({ id: "repo-" + r.id, group: "Repositories", icon: <Icons.Repo />, label: r.org + "/" + r.name, sub: r.description, run: () => onNavigate({ view: "repo", repo: r.id }) });
-    });
-    // PRs
-    PRS.forEach(p => {
-      acts.push({ id: "pr-" + p.id, group: "Pull requests", icon: <Icons.PR />, label: "#" + p.id + " " + p.title, sub: p.repo, run: () => onNavigate({ view: "pr", pr: p.id }) });
-    });
-    // Files in atlas
-    const walk = (nodes) => {
-      nodes.forEach(n => {
-        if (n.type === "file") {
-          acts.push({ id: "file-" + n.path, group: "Files in kelp/atlas", icon: <Icons.File />, label: n.name, sub: n.path, run: () => onNavigate({ view: "repo", repo: "kelp/atlas", file: n.path }) });
-        }
-        if (n.children) walk(n.children);
-      });
-    };
-    walk(FILE_TREE);
     return acts;
   }, [onNavigate]);
 
-  // Filter
+  // Fetch live hits (debounced) whenever the query changes while open.
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const res = await window.OrchisAPI.get("/v1/search/palette?q=" + encodeURIComponent(q));
+        if (!cancelled) setHits({ repos: res.repos || [], pulls: res.pulls || [], files: res.files || [] });
+      } catch (_) {
+        if (!cancelled) setHits({ repos: [], pulls: [], files: [] });
+      }
+    }, q.trim() ? 140 : 0);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [q, open]);
+
+  // Server hits mapped into action rows (run = navigate to the route).
+  const serverActions = React.useMemo(() => {
+    const acts = [];
+    (hits.repos || []).forEach(r => {
+      acts.push({ id: "repo-" + r.id, group: "Repositories", icon: <Icons.Repo />, label: r.label, sub: r.sub, run: () => onNavigate(r.route) });
+    });
+    (hits.pulls || []).forEach(p => {
+      acts.push({ id: "pr-" + p.id, group: "Pull requests", icon: <Icons.PR />, label: p.label, sub: p.sub, run: () => onNavigate(p.route) });
+    });
+    (hits.files || []).forEach(f => {
+      acts.push({ id: "file-" + f.id, group: "Files", icon: <Icons.File />, label: f.label, sub: f.sub, run: () => onNavigate(f.route) });
+    });
+    return acts;
+  }, [hits, onNavigate]);
+
+  // Filter the static actions client-side; server actions are already filtered.
   const filtered = React.useMemo(() => {
-    if (!q.trim()) return allActions.slice(0, 18);
-    const ql = q.toLowerCase();
-    return allActions
-      .map(a => {
-        const hay = (a.label + " " + (a.sub || "") + " " + (a.hint || "") + " " + a.group).toLowerCase();
-        if (!hay.includes(ql)) return null;
-        // simple ranking — startsWith on label wins
-        const score = a.label.toLowerCase().startsWith(ql) ? 0 : a.label.toLowerCase().includes(ql) ? 1 : 2;
-        return { ...a, _score: score };
-      })
-      .filter(Boolean)
-      .sort((a, b) => a._score - b._score)
-      .slice(0, 24);
-  }, [q, allActions]);
+    let statics;
+    if (!q.trim()) {
+      statics = staticActions;
+    } else {
+      const ql = q.toLowerCase();
+      statics = staticActions
+        .map(a => {
+          const hay = (a.label + " " + (a.sub || "") + " " + (a.hint || "") + " " + a.group).toLowerCase();
+          if (!hay.includes(ql)) return null;
+          const score = a.label.toLowerCase().startsWith(ql) ? 0 : a.label.toLowerCase().includes(ql) ? 1 : 2;
+          return { ...a, _score: score };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a._score - b._score);
+    }
+    return [...statics, ...serverActions].slice(0, 40);
+  }, [q, staticActions, serverActions]);
 
   // Group rendering
   const groups = React.useMemo(() => {
@@ -112,7 +129,7 @@ function Palette({ open, onClose, onNavigate }) {
         <div style={palStyles.results}>
           {groups.length === 0 ? (
             <div style={{ padding: 24, textAlign: "center", color: "var(--fg-3)", fontSize: 13 }}>
-              No matches. Try “token”, “atlas”, or “webhook”.
+              No matches. Try “token”, a repo name, or “webhook”.
             </div>
           ) : groups.map(g => (
             <div key={g.name}>

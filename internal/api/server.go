@@ -91,6 +91,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/me/activity", s.requireUser(s.handleActivity))
 		r.Get("/me/inbox", s.requireUser(s.handleInbox))
 
+		// Search (command palette)
+		r.Get("/search/palette", s.requireUser(s.handlePaletteSearch))
+
 		// Repositories
 		r.Get("/repos", s.requireUser(s.handleListRepos))
 		r.Post("/repos", s.requireScope("repo:admin", s.handleCreateRepo))

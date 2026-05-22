@@ -6,10 +6,10 @@ function inboxIcon(name) {
   return <Icons.Issue />;
 }
 
-function DashboardView({ setRoute, openPalette }) {
+function DashboardView({ setRoute, openPalette, route }) {
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   const firstName = (USERS.me.name || USERS.me.handle || "there").split(" ")[0];
-  const [showNewRepo, setShowNewRepo] = React.useState(false);
+  const [showNewRepo, setShowNewRepo] = React.useState(!!(route && route.newRepo));
   const [inbox, setInbox] = React.useState(null);
   const [activity, setActivity] = React.useState(null);
   React.useEffect(() => {
