@@ -4985,6 +4985,23 @@ function PRView({
   React.useEffect(() => {
     reload();
   }, [reload]);
+
+  // Realtime: live-refresh this PR when someone comments / reviews / merges,
+  // or when a check (e.g. orchis-scan) updates. SSE auth rides the cookie.
+  const [live, setLive] = React.useState(false);
+  React.useEffect(() => {
+    if (!window.EventSource || !repo || prId == null) return;
+    const topic = `pull:${repo}#${prId}`;
+    const es = new EventSource(`/v1/stream?topics=${encodeURIComponent(topic)}`);
+    es.onopen = () => setLive(true);
+    es.onerror = () => setLive(false);
+    const onEvent = () => reload();
+    ["pull.commented", "pull.reviewed", "pull.merged", "check.updated"].forEach(k => es.addEventListener(k, onEvent));
+    return () => {
+      es.close();
+      setLive(false);
+    };
+  }, [repo, prId, reload]);
   const [merging, setMerging] = React.useState(false);
   const [actionErr, setActionErr] = React.useState("");
   const doMerge = async strategy => {
@@ -5233,7 +5250,23 @@ function PRView({
     good: true
   }), /*#__PURE__*/React.createElement("span", {
     className: "spacer"
-  }), /*#__PURE__*/React.createElement("span", {
+  }), live ? /*#__PURE__*/React.createElement("span", {
+    className: "row",
+    style: {
+      gap: 5,
+      fontSize: 11,
+      color: "var(--accent)"
+    },
+    title: "Live \u2014 this page updates in real time"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 7,
+      height: 7,
+      borderRadius: 999,
+      background: "var(--accent)",
+      boxShadow: "0 0 0 3px var(--accent-soft)"
+    }
+  }), "Live") : null, /*#__PURE__*/React.createElement("span", {
     className: "muted",
     style: {
       fontSize: 11.5

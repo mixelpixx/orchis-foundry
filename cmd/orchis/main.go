@@ -22,6 +22,7 @@ import (
 	gitstore "github.com/orchis-ai/foundry/internal/git"
 	"github.com/orchis-ai/foundry/internal/logging"
 	"github.com/orchis-ai/foundry/internal/oidc"
+	"github.com/orchis-ai/foundry/internal/realtime"
 	"github.com/orchis-ai/foundry/internal/scan"
 	"github.com/orchis-ai/foundry/internal/webhook"
 	"github.com/orchis-ai/foundry/internal/sshd"
@@ -104,13 +105,16 @@ func main() {
 		}
 	}
 
+	// In-process pub/sub for realtime (SSE) events.
+	hub := realtime.NewHub()
+
 	// LLM supply-chain scan worker (started after the signal context exists).
-	scanWorker := scan.NewWorker(database, gitStore, log)
+	scanWorker := scan.NewWorker(database, gitStore, log, hub)
 
 	// Outbound webhook delivery worker.
 	webhookWorker := webhook.NewWorker(database, log)
 
-	srv := api.New(cfg, log, webFS, database, sessions, github, gitStore, scanWorker, webhookWorker)
+	srv := api.New(cfg, log, webFS, database, sessions, github, gitStore, scanWorker, webhookWorker, hub)
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv.Router(),

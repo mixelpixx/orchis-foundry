@@ -16,6 +16,7 @@ import (
 	"github.com/orchis-ai/foundry/internal/config"
 	gitstore "github.com/orchis-ai/foundry/internal/git"
 	"github.com/orchis-ai/foundry/internal/oidc"
+	"github.com/orchis-ai/foundry/internal/realtime"
 	"github.com/orchis-ai/foundry/internal/scan"
 	"github.com/orchis-ai/foundry/internal/webhook"
 )
@@ -31,11 +32,12 @@ type Server struct {
 	git      *gitstore.Store
 	scan     *scan.Worker
 	webhooks *webhook.Worker
+	rt       *realtime.Hub
 }
 
 // New constructs a Server. webFS is the embedded (or on-disk) frontend tree.
-func New(cfg *config.Config, log *slog.Logger, webFS fs.FS, db *sql.DB, sessions *auth.Manager, github *oidc.GitHub, git *gitstore.Store, scanWorker *scan.Worker, webhookWorker *webhook.Worker) *Server {
-	return &Server{cfg: cfg, log: log, web: webFS, db: db, sessions: sessions, github: github, git: git, scan: scanWorker, webhooks: webhookWorker}
+func New(cfg *config.Config, log *slog.Logger, webFS fs.FS, db *sql.DB, sessions *auth.Manager, github *oidc.GitHub, git *gitstore.Store, scanWorker *scan.Worker, webhookWorker *webhook.Worker, hub *realtime.Hub) *Server {
+	return &Server{cfg: cfg, log: log, web: webFS, db: db, sessions: sessions, github: github, git: git, scan: scanWorker, webhooks: webhookWorker, rt: hub}
 }
 
 // Router builds the chi router with all routes mounted.
@@ -103,6 +105,9 @@ func (s *Server) Router() http.Handler {
 
 		// Search (command palette)
 		r.Get("/search/palette", s.requireUser(s.handlePaletteSearch))
+
+		// Realtime stream (SSE)
+		r.Get("/stream", s.requireUser(s.handleStream))
 
 		// Pins & stars
 		r.Get("/me/pinned", s.requireUser(s.handleListPinned))

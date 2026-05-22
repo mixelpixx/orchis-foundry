@@ -68,20 +68,21 @@ func (s *Server) handlePushHook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fan out a `push` webhook event to subscribers of this repo.
+	// Fan out a `push` event to webhook subscribers and live SSE listeners.
+	var owner, name string
+	s.db.QueryRowContext(r.Context(),
+		`SELECT u.handle, rp.name FROM repos rp JOIN users u ON u.id = rp.owner_user_id WHERE rp.id = ?`,
+		in.RepoID).Scan(&owner, &name)
+	refs := make([]map[string]string, 0, len(in.Refs))
+	for _, rf := range in.Refs {
+		refs = append(refs, map[string]string{"ref": rf.Ref, "old": rf.Old, "new": rf.New})
+	}
 	if s.webhooks != nil {
-		var owner, name string
-		s.db.QueryRowContext(r.Context(),
-			`SELECT u.handle, rp.name FROM repos rp JOIN users u ON u.id = rp.owner_user_id WHERE rp.id = ?`,
-			in.RepoID).Scan(&owner, &name)
-		refs := make([]map[string]string, 0, len(in.Refs))
-		for _, rf := range in.Refs {
-			refs = append(refs, map[string]string{"ref": rf.Ref, "old": rf.Old, "new": rf.New})
-		}
 		s.webhooks.Fire(r.Context(), in.RepoID, "push", map[string]any{
 			"event": "push", "repo": owner + "/" + name, "repoId": in.RepoID, "refs": refs,
 		})
 	}
+	s.publish(repoTopic(owner, name), "push", map[string]any{"repo": owner + "/" + name, "refs": refs})
 
 	s.log.Info("push received", "repo_id", in.RepoID, "language", lang, "prs_refreshed", len(prs))
 	w.WriteHeader(http.StatusNoContent)

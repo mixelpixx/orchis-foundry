@@ -8,6 +8,7 @@ import (
 	"time"
 
 	gitstore "github.com/orchis-ai/foundry/internal/git"
+	"github.com/orchis-ai/foundry/internal/realtime"
 )
 
 // Worker drains the scan_jobs queue and runs scans against each repo owner's
@@ -16,11 +17,12 @@ type Worker struct {
 	db   *sql.DB
 	git  *gitstore.Store
 	log  *slog.Logger
+	hub  *realtime.Hub
 	wake chan struct{}
 }
 
-func NewWorker(db *sql.DB, git *gitstore.Store, log *slog.Logger) *Worker {
-	return &Worker{db: db, git: git, log: log, wake: make(chan struct{}, 1)}
+func NewWorker(db *sql.DB, git *gitstore.Store, log *slog.Logger, hub *realtime.Hub) *Worker {
+	return &Worker{db: db, git: git, log: log, hub: hub, wake: make(chan struct{}, 1)}
 }
 
 // Enqueue adds a scan job for a pull at a sha and nudges the worker.
@@ -151,17 +153,25 @@ func (w *Worker) process(ctx context.Context, jobID, pullID, repoID int64, sha s
 	w.upsertCheck(repoID, sha, status, summarize(res))
 	w.db.Exec(`UPDATE scan_jobs SET status='done', finished_at=datetime('now') WHERE id=?`, jobID)
 
+	// Resolve the PR's owner/name/number once (for realtime + activity).
+	var owner, name string
+	var num int
+	havePR := w.db.QueryRow(
+		`SELECT uo.handle, rp.name, p.number FROM pulls p
+		 JOIN repos rp ON rp.id = p.repo_id JOIN users uo ON uo.id = rp.owner_user_id
+		 WHERE p.id = ?`, pullID).Scan(&owner, &name, &num) == nil
+
+	// Push a live check.updated event so open PR views flip the check instantly.
+	if havePR && w.hub != nil {
+		payload := map[string]any{"repo": owner + "/" + name, "number": num, "name": "orchis-scan", "status": status}
+		w.hub.Publish(fmt.Sprintf("pull:%s/%s#%d", owner, name, num), "check.updated", payload)
+		w.hub.Publish("repo:"+owner+"/"+name, "check.updated", payload)
+	}
+
 	// Feed event when the scan flags something.
-	if res.Overall != "clean" && len(res.Findings) > 0 {
-		var owner, name string
-		var num int
-		if err := w.db.QueryRow(
-			`SELECT uo.handle, rp.name, p.number FROM pulls p
-			 JOIN repos rp ON rp.id = p.repo_id JOIN users uo ON uo.id = rp.owner_user_id
-			 WHERE p.id = ?`, pullID).Scan(&owner, &name, &num); err == nil {
-			w.db.Exec(`INSERT INTO activity (actor_id, kind, repo_id, target, title) VALUES (NULL,'scan_flagged',?,?,?)`,
-				repoID, fmt.Sprintf("%s/%s#%d", owner, name, num), fmt.Sprintf("%s — %d finding(s)", res.Overall, len(res.Findings)))
-		}
+	if res.Overall != "clean" && len(res.Findings) > 0 && havePR {
+		w.db.Exec(`INSERT INTO activity (actor_id, kind, repo_id, target, title) VALUES (NULL,'scan_flagged',?,?,?)`,
+			repoID, fmt.Sprintf("%s/%s#%d", owner, name, num), fmt.Sprintf("%s — %d finding(s)", res.Overall, len(res.Findings)))
 	}
 	w.log.Info("scan complete", "job", jobID, "overall", res.Overall, "findings", len(res.Findings))
 }

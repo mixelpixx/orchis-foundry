@@ -23,6 +23,20 @@ function PRView({ prId, repo, setRoute }) {
   }, [base]);
   React.useEffect(() => { reload(); }, [reload]);
 
+  // Realtime: live-refresh this PR when someone comments / reviews / merges,
+  // or when a check (e.g. orchis-scan) updates. SSE auth rides the cookie.
+  const [live, setLive] = React.useState(false);
+  React.useEffect(() => {
+    if (!window.EventSource || !repo || prId == null) return;
+    const topic = `pull:${repo}#${prId}`;
+    const es = new EventSource(`/v1/stream?topics=${encodeURIComponent(topic)}`);
+    es.onopen = () => setLive(true);
+    es.onerror = () => setLive(false);
+    const onEvent = () => reload();
+    ["pull.commented", "pull.reviewed", "pull.merged", "check.updated"].forEach(k => es.addEventListener(k, onEvent));
+    return () => { es.close(); setLive(false); };
+  }, [repo, prId, reload]);
+
   const [merging, setMerging] = React.useState(false);
   const [actionErr, setActionErr] = React.useState("");
 
@@ -135,6 +149,12 @@ function PRView({ prId, repo, setRoute }) {
         } />
         <Stat icon={<Icons.Branch size={12} />} label="mergeable" value={<span style={{ color: "var(--accent)" }}>clean — no conflicts</span>} good />
         <span className="spacer" />
+        {live ? (
+          <span className="row" style={{ gap: 5, fontSize: 11, color: "var(--accent)" }} title="Live — this page updates in real time">
+            <span style={{ width: 7, height: 7, borderRadius: 999, background: "var(--accent)", boxShadow: "0 0 0 3px var(--accent-soft)" }} />
+            Live
+          </span>
+        ) : null}
         <span className="muted" style={{ fontSize: 11.5 }}>{pr.comments} comments</span>
       </div>
 

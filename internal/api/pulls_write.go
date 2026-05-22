@@ -61,6 +61,9 @@ func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 	s.db.ExecContext(r.Context(), `UPDATE pulls SET updated_at = datetime('now') WHERE id = ?`, pullID)
 	id, _ := res.LastInsertId()
 	s.logActivity(r.Context(), u.ID, "pr_commented", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(num), in.Body)
+	s.publish(pullTopic(row.OwnerHandle, row.Name, num), "pull.commented", map[string]any{
+		"number": num, "repo": row.OwnerHandle + "/" + row.Name, "author": u.Handle,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": id, "author": s.userBrief(u.ID), "body": in.Body,
 		"path": in.Path, "line": in.Line, "side": in.Side, "when": "just now",
@@ -126,6 +129,9 @@ func (s *Server) handleSubmitReview(w http.ResponseWriter, r *http.Request) {
 	}
 	s.db.ExecContext(r.Context(), `UPDATE pulls SET updated_at = datetime('now') WHERE id = ?`, pullID)
 	s.logActivity(r.Context(), u.ID, "pr_reviewed", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(num), in.Verdict)
+	s.publish(pullTopic(row.OwnerHandle, row.Name, num), "pull.reviewed", map[string]any{
+		"number": num, "repo": row.OwnerHandle + "/" + row.Name, "verdict": in.Verdict, "author": u.Handle,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verdict": in.Verdict})
 }
 
@@ -191,6 +197,9 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 			"number": num, "title": prTitle, "strategy": in.Strategy, "merged_by": u.Handle,
 		})
 	}
+	s.publish(pullTopic(row.OwnerHandle, row.Name, num), "pull.merged", map[string]any{
+		"number": num, "repo": row.OwnerHandle + "/" + row.Name, "merged_by": u.Handle,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"merged": true, "strategy": in.Strategy})
 }
 
