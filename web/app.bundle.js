@@ -8524,6 +8524,18 @@ function AccountPanel() {
       padding: 20
     }
   }, "Loading\u2026");
+  const fileRef = React.useRef(null);
+  const [avatarBusy, setAvatarBusy] = React.useState(false);
+  const applyMe = u => {
+    setMe(u);
+    if (window.USERS && USERS.me) {
+      USERS.me.name = u.name;
+      USERS.me.bio = u.bio;
+      USERS.me.initials = u.initials;
+      USERS.me.avatarUrl = u.avatarUrl;
+    }
+    window.dispatchEvent(new CustomEvent("orchis:me-changed"));
+  };
   const save = async () => {
     setErr("");
     setSaved(false);
@@ -8533,19 +8545,44 @@ function AccountPanel() {
         name: name.trim(),
         bio: bio.trim()
       });
-      setMe(u);
-      if (window.USERS && USERS.me) {
-        USERS.me.name = u.name;
-        USERS.me.bio = u.bio;
-        USERS.me.initials = u.initials;
-      }
-      window.dispatchEvent(new CustomEvent("orchis:me-changed"));
+      applyMe(u);
       setSaved(true);
     } catch (e) {
       setErr("Could not save — name must be 1–80 chars and bio ≤ 280.");
     } finally {
       setBusy(false);
     }
+  };
+  const uploadAvatar = async file => {
+    if (!file) return;
+    setErr("");
+    setAvatarBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("avatar", file);
+      const r = await fetch("/v1/me/avatar", {
+        method: "POST",
+        credentials: "same-origin",
+        body: fd
+      });
+      if (!r.ok) throw new Error();
+      applyMe(await r.json());
+    } catch (e) {
+      setErr("Could not upload — use a png/jpeg/gif/webp under 512 KB.");
+    } finally {
+      setAvatarBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+  const removeAvatar = async () => {
+    setErr("");
+    try {
+      const r = await fetch("/v1/me/avatar", {
+        method: "DELETE",
+        credentials: "same-origin"
+      });
+      if (r.ok) applyMe(await r.json());
+    } catch (e) {}
   };
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: dsStyles.head
@@ -8594,7 +8631,8 @@ function AccountPanel() {
       width: 56,
       height: 56,
       borderRadius: 999,
-      border: "1px solid var(--line)"
+      border: "1px solid var(--line)",
+      objectFit: "cover"
     }
   }) : /*#__PURE__*/React.createElement("span", {
     className: "avatar",
@@ -8604,7 +8642,12 @@ function AccountPanel() {
       height: 56,
       fontSize: 20
     }
-  }, me.initials), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, me.initials), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 15,
       fontWeight: 500
@@ -8614,7 +8657,25 @@ function AccountPanel() {
     style: {
       fontSize: 12.5
     }
-  }, me.email || "no email on file"))), /*#__PURE__*/React.createElement(Field, {
+  }, me.email || "no email on file")), /*#__PURE__*/React.createElement("input", {
+    ref: fileRef,
+    type: "file",
+    accept: "image/png,image/jpeg,image/gif,image/webp",
+    style: {
+      display: "none"
+    },
+    onChange: e => uploadAvatar(e.target.files && e.target.files[0])
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn sm",
+    disabled: avatarBusy,
+    onClick: () => fileRef.current && fileRef.current.click()
+  }, avatarBusy ? "Uploading…" : "Change photo"), me.avatarUrl ? /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    style: {
+      color: "var(--danger)"
+    },
+    onClick: removeAvatar
+  }, "Remove") : null), /*#__PURE__*/React.createElement(Field, {
     label: "Display name"
   }, /*#__PURE__*/React.createElement("input", {
     className: "input",
@@ -9133,12 +9194,14 @@ const dsStyles = {
     color: "var(--fg-1)",
     fontSize: 13,
     font: "inherit",
-    fontWeight: 450
+    fontWeight: 450,
+    transition: "background 80ms, color 80ms"
   },
   sideTabActive: {
-    background: "var(--bg-2)",
-    color: "var(--fg)",
-    borderColor: "var(--line)"
+    background: "var(--accent-soft)",
+    color: "var(--accent)",
+    borderColor: "var(--accent-line)",
+    fontWeight: 500
   },
   main: {
     minWidth: 0

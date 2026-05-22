@@ -76,6 +76,8 @@ func (s *Server) Router() http.Handler {
 		r.Post("/auth/logout", s.handleLogout)
 		r.Get("/me", s.handleMe)
 		r.Patch("/me", s.requireUser(s.handlePatchMe))
+		r.Post("/me/avatar", s.requireUser(s.handleUploadAvatar))
+		r.Delete("/me/avatar", s.requireUser(s.handleDeleteAvatar))
 		r.Get("/me/preferences", s.requireUser(s.handleGetPreferences))
 		r.Patch("/me/preferences", s.requireUser(s.handlePatchPreferences))
 		r.Get("/me/sessions", s.requireUser(s.handleListSessions))
@@ -111,6 +113,7 @@ func (s *Server) Router() http.Handler {
 
 		// Public user profiles
 		r.Get("/users/{handle}", s.handleUserProfile)
+		r.Get("/users/{handle}/avatar", s.handleServeAvatar)
 
 		// Search (command palette + code search)
 		r.Get("/search/palette", s.requireUser(s.handlePaletteSearch))
@@ -262,7 +265,7 @@ func securityHeaders(next http.Handler) http.Handler {
 				"script-src 'self'; "+
 				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"font-src 'self' https://fonts.gstatic.com; "+
-				"img-src 'self' data:; "+
+				"img-src 'self' data: https:; "+ // https: lets externally-hosted avatars (e.g. GitHub) render; uploaded avatars are served from 'self'
 				"connect-src 'self'; "+
 				"frame-ancestors 'none'; base-uri 'self'")
 		next.ServeHTTP(w, r)

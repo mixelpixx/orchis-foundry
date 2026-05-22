@@ -503,16 +503,41 @@ function AccountPanel() {
 
   if (!me) return <div className="muted" style={{ padding: 20 }}>Loading…</div>;
 
+  const fileRef = React.useRef(null);
+  const [avatarBusy, setAvatarBusy] = React.useState(false);
+
+  const applyMe = (u) => {
+    setMe(u);
+    if (window.USERS && USERS.me) { USERS.me.name = u.name; USERS.me.bio = u.bio; USERS.me.initials = u.initials; USERS.me.avatarUrl = u.avatarUrl; }
+    window.dispatchEvent(new CustomEvent("orchis:me-changed"));
+  };
+
   const save = async () => {
     setErr(""); setSaved(false); setBusy(true);
     try {
       const u = await window.OrchisAPI.patch("/v1/me", { name: name.trim(), bio: bio.trim() });
-      setMe(u);
-      if (window.USERS && USERS.me) { USERS.me.name = u.name; USERS.me.bio = u.bio; USERS.me.initials = u.initials; }
-      window.dispatchEvent(new CustomEvent("orchis:me-changed"));
-      setSaved(true);
+      applyMe(u); setSaved(true);
     } catch (e) { setErr("Could not save — name must be 1–80 chars and bio ≤ 280."); }
     finally { setBusy(false); }
+  };
+
+  const uploadAvatar = async (file) => {
+    if (!file) return;
+    setErr(""); setAvatarBusy(true);
+    try {
+      const fd = new FormData(); fd.append("avatar", file);
+      const r = await fetch("/v1/me/avatar", { method: "POST", credentials: "same-origin", body: fd });
+      if (!r.ok) throw new Error();
+      applyMe(await r.json());
+    } catch (e) { setErr("Could not upload — use a png/jpeg/gif/webp under 512 KB."); }
+    finally { setAvatarBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+  const removeAvatar = async () => {
+    setErr("");
+    try {
+      const r = await fetch("/v1/me/avatar", { method: "DELETE", credentials: "same-origin" });
+      if (r.ok) applyMe(await r.json());
+    } catch (e) {}
   };
 
   return (
@@ -530,12 +555,15 @@ function AccountPanel() {
       <div className="card" style={{ padding: 18, marginTop: 14, display: "flex", flexDirection: "column", gap: 16 }}>
         <div className="row" style={{ gap: 14 }}>
           {me.avatarUrl
-            ? <img src={me.avatarUrl} alt="" style={{ width: 56, height: 56, borderRadius: 999, border: "1px solid var(--line)" }} />
+            ? <img src={me.avatarUrl} alt="" style={{ width: 56, height: 56, borderRadius: 999, border: "1px solid var(--line)", objectFit: "cover" }} />
             : <span className="avatar" style={{ background: me.color, width: 56, height: 56, fontSize: 20 }}>{me.initials}</span>}
-          <div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 15, fontWeight: 500 }}>{me.handle}</div>
             <div className="subtle" style={{ fontSize: 12.5 }}>{me.email || "no email on file"}</div>
           </div>
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" style={{ display: "none" }} onChange={e => uploadAvatar(e.target.files && e.target.files[0])} />
+          <button className="btn sm" disabled={avatarBusy} onClick={() => fileRef.current && fileRef.current.click()}>{avatarBusy ? "Uploading…" : "Change photo"}</button>
+          {me.avatarUrl ? <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={removeAvatar}>Remove</button> : null}
         </div>
         <Field label="Display name">
           <input className="input" value={name} onChange={e => { setName(e.target.value); setSaved(false); }} maxLength={80} />
@@ -785,9 +813,10 @@ const dsStyles = {
     background: "transparent", border: "1px solid transparent",
     borderRadius: 6, cursor: "pointer", color: "var(--fg-1)",
     fontSize: 13, font: "inherit", fontWeight: 450,
+    transition: "background 80ms, color 80ms",
   },
   sideTabActive: {
-    background: "var(--bg-2)", color: "var(--fg)", borderColor: "var(--line)",
+    background: "var(--accent-soft)", color: "var(--accent)", borderColor: "var(--accent-line)", fontWeight: 500,
   },
   main: { minWidth: 0 },
   head: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" },

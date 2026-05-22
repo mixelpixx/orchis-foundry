@@ -147,6 +147,12 @@ func (m *Manager) UpdateProfile(ctx context.Context, userID int64, name, bio str
 	return err
 }
 
+// UpdateAvatar sets (or clears) the user's avatar URL.
+func (m *Manager) UpdateAvatar(ctx context.Context, userID int64, url string) error {
+	_, err := m.db.ExecContext(ctx, `UPDATE users SET avatar_url = ? WHERE id = ?`, url, userID)
+	return err
+}
+
 // SessionInfo describes one active session for the security UI. PubID is a
 // non-reversible handle (hash prefix of the secret session id) — safe to
 // expose; the raw session id (the cookie credential) is never returned.

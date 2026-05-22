@@ -161,6 +161,15 @@ button { font-family: inherit; }
 .btn.icon { width: var(--row-h); padding: 0; justify-content: center; }
 .btn.sm { height: 26px; font-size: var(--t-xs); padding: 0 8px; }
 
+/* Focus: no lingering ring on mouse click; a clean accent ring for keyboard
+   navigation only (:focus-visible). Applies to all buttons app-wide. */
+button:focus { outline: none; }
+button:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
 /* Chips */
 .chip {
   display: inline-flex; align-items: center; gap: 4px;
