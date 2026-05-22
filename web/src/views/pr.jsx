@@ -217,7 +217,7 @@ function PRView({ prId, repo, setRoute }) {
       <div style={prStyles.body}>
         {tab === "files" ? <FilesChanged files={files != null ? files : PR_DIFF_FILES} openComment={openComment} setOpenComment={setOpenComment} postComment={postComment} addPending={addPending} pending={pending} canComment={!!base} /> : null}
         {tab === "conversation" ? <Conversation pr={pr} comments={comments} postComment={postComment} /> : null}
-        {tab === "commits" ? <CommitsList commits={commits} /> : null}
+        {tab === "commits" ? <CommitsList commits={commits} repo={repo} setRoute={setRoute} /> : null}
         {tab === "checks" ? <ChecksList checks={checks} /> : null}
       </div>
 
@@ -341,6 +341,36 @@ function FileDiff({ file, fi, openComment, setOpenComment, postComment, addPendi
     </div>
   );
 }
+
+// ReadOnlyDiff renders a list of FileDiffs without the comment machinery —
+// used by the compare (new PR) and commit-detail views.
+function ReadOnlyDiff({ files }) {
+  if (!files || files.length === 0) {
+    return <div className="muted" style={{ fontSize: 12.5, padding: "12px 4px" }}>No file changes.</div>;
+  }
+  return (
+    <>
+      {files.map((file, fi) => (
+        <div key={fi} className="card" style={{ marginBottom: 14, overflow: "hidden" }}>
+          <div style={prStyles.fileHead}>
+            <span className="mono" style={{ fontSize: 12.5, fontWeight: 500 }}>{file.path}</span>
+            <span className="chip" style={{ height: 18 }}><span style={{ color: "var(--accent)" }}>+{file.additions}</span></span>
+            <span className="chip" style={{ height: 18 }}><span style={{ color: "var(--danger)" }}>−{file.deletions}</span></span>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            {(file.hunks || []).map((h, hi) => (
+              <div key={hi}>
+                <div style={prStyles.hunkHead}><span className="mono" style={{ fontSize: 11.5, color: "var(--fg-2)" }}>{h.header}</span></div>
+                {h.lines.map((ln, li) => <DiffLine key={li} ln={ln} canComment={false} />)}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+window.ReadOnlyDiff = ReadOnlyDiff;
 
 function DiffLine({ ln, onComment, canComment }) {
   const bg = ln.type === "add" ? "color-mix(in oklab, var(--accent) 10%, var(--bg))"
@@ -467,13 +497,14 @@ function ConvBlock({ author, when, children }) {
   );
 }
 
-function CommitsList({ commits }) {
+function CommitsList({ commits, repo, setRoute }) {
   // Real commits: {sha, short, message, author, email, date}. Fallback to mock when null (offline).
   const mock = [
     { short: "8c1bba0", message: "router: log a warning when fallback is used", author: "Jana", date: "" },
     { short: "0aa9ee4", message: "router: switch fallback sink to bounded channel", author: "Jana", date: "" },
   ];
   const list = commits != null ? commits : mock;
+  const open = (c) => { if (setRoute && repo && c.sha) setRoute({ view: "commit", repo, sha: c.sha }); };
   return (
     <div style={{ maxWidth: 820, margin: "0 auto", padding: "20px 24px" }}>
       {list.length === 0 ? (
@@ -481,14 +512,14 @@ function CommitsList({ commits }) {
       ) : (
       <div className="card" style={{ padding: 4 }}>
         {list.map((c, i) => (
-          <div key={c.sha || i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none" }}>
+          <button key={c.sha || i} onClick={() => open(c)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left", padding: "10px 14px", borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none", background: "transparent", border: "none", cursor: c.sha ? "pointer" : "default", font: "inherit", color: "inherit" }}>
             <Icons.Commit size={14} style={{ color: "var(--fg-3)" }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 450, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(c.message || "").split("\n")[0]}</div>
               <div className="subtle" style={{ fontSize: 11.5, marginTop: 2 }}>{c.author}{c.date ? " · " + (c.date || "").slice(0, 10) : ""}</div>
             </div>
             <span className="mono chip">{c.short || (c.sha || "").slice(0, 7)}</span>
-          </div>
+          </button>
         ))}
       </div>
       )}
@@ -679,7 +710,11 @@ function PRsView({ setRoute }) {
   return (
     <div style={{ overflowY: "auto", height: "100%" }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 32px 60px" }} className="fade-in">
-        <h1 style={{ fontSize: 26, fontWeight: 500, letterSpacing: "-0.02em", margin: "0 0 6px" }}>Pull requests</h1>
+        <div className="row">
+          <h1 style={{ fontSize: 26, fontWeight: 500, letterSpacing: "-0.02em", margin: "0 0 6px" }}>Pull requests</h1>
+          <span className="spacer" />
+          <button className="btn primary sm" onClick={() => setRoute({ view: "newpr" })}><Icons.Plus size={13} /> New pull request</button>
+        </div>
         <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>Across all your repos.</p>
 
         <div className="row" style={{ gap: 6, margin: "20px 0 14px", flexWrap: "wrap" }}>

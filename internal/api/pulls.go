@@ -173,6 +173,45 @@ func (s *Server) handleListRepoPulls(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// GET /v1/repos/:org/:name/compare?base=&head= — preview a PR between two
+// branches (diff + commits) without creating one. Read-only, ACL via loadRepo.
+func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.loadRepo(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	base := r.URL.Query().Get("base")
+	if base == "" {
+		base = row.DefaultBranch
+	}
+	head := r.URL.Query().Get("head")
+	if head == "" {
+		writeError(w, http.StatusBadRequest, "head branch required")
+		return
+	}
+	headSHA, err := s.git.RevParse(row.ID, head)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "head not found: "+head)
+		return
+	}
+	baseSHA, err := s.git.MergeBase(row.ID, base, head)
+	if err != nil || baseSHA == "" {
+		if baseSHA, err = s.git.RevParse(row.ID, base); err != nil {
+			writeError(w, http.StatusBadRequest, "base not found: "+base)
+			return
+		}
+	}
+	adds, dels, files := s.git.DiffStat(row.ID, baseSHA, headSHA)
+	commits, _ := s.git.RangeCommits(row.ID, baseSHA, headSHA, 200)
+	diffs, _ := s.git.Diff(row.ID, baseSHA, headSHA)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"base": base, "head": head,
+		"aheadBy": len(commits), "additions": adds, "deletions": dels, "filesCount": files,
+		"commits": commits, "files": diffs,
+	})
+}
+
 // POST /v1/repos/:org/:name/pulls { title, head, base, body }
 func (s *Server) handleCreatePull(w http.ResponseWriter, r *http.Request) {
 	row, ok := s.loadRepo(r)

@@ -122,7 +122,7 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
           {splitOpen ? (
             <>
               <div style={{ width: `calc(${mainSplit * 100}% - 3px)`, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                <RepoMainPanel repo={repo} repoId={repoId} active={active} tab={tab} setTab={setTab} setActive={onPickFile} />
+                <RepoMainPanel repo={repo} repoId={repoId} active={active} tab={tab} setTab={setTab} setActive={onPickFile} setRoute={setRoute} />
               </div>
               <div style={repoStyles.mainResizer} onMouseDown={startMainResize} />
               <div style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", borderLeft: "1px solid var(--line)" }}>
@@ -215,6 +215,9 @@ function RepoHeader({ repo, setRoute, openSplit, isOwner, onSettings, meta, togg
       <div className="row" style={{ gap: 6, flexShrink: 0 }}>
         <button className="btn sm" onClick={() => openSplit({ type: "prs", repo: repo.id })} title="Open PRs in split">
           <Icons.PR size={12} /> PRs <span className="chip" style={{ height: 16, fontSize: 10 }}>3</span>
+        </button>
+        <button className="btn sm" onClick={() => setRoute({ view: "newpr", repo: repo.id })} title="Open a pull request">
+          <Icons.Plus size={12} /> PR
         </button>
         <button className="btn sm" onClick={() => openSplit({ type: "issues", repo: repo.id })}>
           <Icons.Issue size={12} /> Issues
@@ -373,30 +376,65 @@ function RepoSettingsModal({ repo, onClose, setRoute }) {
   );
 }
 
-function RepoMainPanel({ repo, repoId, active, tab, setTab, setActive }) {
+function RepoMainPanel({ repo, repoId, active, tab, setTab, setActive, setRoute }) {
   return (
     <>
       <div style={repoStyles.subtabs}>
         <Subtab active={tab === "code"} onClick={() => setTab("code")} icon={<Icons.Code size={12} />}>Code</Subtab>
         <Subtab active={tab === "readme"} onClick={() => setTab("readme")} icon={<Icons.Book size={12} />}>Readme</Subtab>
+        <Subtab active={tab === "commits"} onClick={() => setTab("commits")} icon={<Icons.Commit size={12} />}>Commits</Subtab>
         <Subtab active={tab === "activity"} onClick={() => setTab("activity")} icon={<Icons.Activity size={12} />}>Activity</Subtab>
         <Subtab active={tab === "releases"} onClick={() => setTab("releases")} icon={<Icons.Tag size={12} />}>Releases</Subtab>
-        <span className="spacer" />
-        <span className="row" style={{ gap: 8, color: "var(--fg-2)", fontSize: 12 }}>
-          <Icons.Commit size={12} />
-          <span className="mono">a3f9c12</span>
-          <span className="subtle">by Jana, 12 min ago</span>
-        </span>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {tab === "code" ? <CodeView repoId={repoId} path={active} /> : null}
         {tab === "readme" ? <ReadmeView repoId={repoId} /> : null}
+        {tab === "commits" ? <RepoCommitsList repoId={repoId} repo={repo} setRoute={setRoute} /> : null}
         {tab === "activity" ? <RecentActivityView repoId={repoId} /> : null}
         {tab === "releases" ? <ReleasesView repo={repo} repoId={repoId} /> : null}
       </div>
     </>
   );
+}
+
+// RepoCommitsList — commit history for the repo's default branch; rows open the
+// commit detail view.
+function RepoCommitsList({ repoId, repo, setRoute }) {
+  const [commits, setCommits] = React.useState(null);
+  React.useEffect(() => {
+    if (window.OrchisAPI && repoId) window.OrchisAPI.get(`/v1/repos/${repoId}/commits?limit=100`).then(setCommits).catch(() => setCommits([]));
+  }, [repoId]);
+  const list = commits || [];
+  return (
+    <div style={{ padding: "20px 24px", maxWidth: 900 }}>
+      {commits == null ? <div className="muted" style={{ fontSize: 12.5 }}>Loading…</div> : null}
+      {commits != null && list.length === 0 ? <div className="card" style={{ padding: "20px 18px", color: "var(--fg-3)", fontSize: 13 }}>No commits yet.</div> : null}
+      {list.length > 0 ? (
+        <div className="card" style={{ overflow: "hidden" }}>
+          {list.map((c, i) => (
+            <button key={c.sha} onClick={() => setRoute({ view: "commit", repo: repoId, sha: c.sha })}
+              style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left", padding: "11px 14px", background: "transparent", border: "none", borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none", cursor: "pointer", font: "inherit", color: "inherit" }}>
+              <Icons.Commit size={14} style={{ color: "var(--fg-2)" }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 450, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.message.split("\n")[0]}</div>
+                <div className="subtle" style={{ fontSize: 11.5, marginTop: 2 }}>{c.author} · {relativeDate(c.date)}</div>
+              </div>
+              <span className="mono subtle" style={{ fontSize: 11.5 }}>{c.short}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// relativeDate renders an ISO date compactly (the API already sends UTC ISO).
+function relativeDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 function Subtab({ active, onClick, icon, children }) {

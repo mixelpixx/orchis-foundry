@@ -424,6 +424,31 @@ func (s *Server) handleRepoCommits(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, commits)
 }
 
+// GET /v1/repos/{org}/{name}/commits/{sha} — single commit + its diff.
+func (s *Server) handleRepoCommitDetail(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.loadRepo(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	sha := chi.URLParam(r, "sha")
+	meta, files, err := s.git.CommitDetail(row.ID, sha)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "commit not found")
+		return
+	}
+	adds, dels := 0, 0
+	for _, f := range files {
+		adds += f.Additions
+		dels += f.Deletions
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sha": meta.SHA, "short": meta.Short, "message": meta.Message,
+		"author": meta.Author, "email": meta.Email, "date": meta.Date,
+		"additions": adds, "deletions": dels, "files": files,
+	})
+}
+
 // repoByID loads a repo row by numeric ID (used by git-http + hooks).
 func (s *Server) repoByID(id int64) (*repoRow, error) {
 	row := &repoRow{}

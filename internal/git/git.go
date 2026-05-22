@@ -266,6 +266,39 @@ func (s *Store) Commits(repoID int64, ref string, limit int) ([]Commit, error) {
 	return out, nil
 }
 
+// emptyTreeSHA is git's canonical empty-tree object, used to diff a root
+// commit (which has no parent) against "nothing".
+const emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// CommitDetail returns a single commit's metadata plus its diff (against its
+// first parent, or the empty tree for a root commit). ref may be a sha, short
+// sha, branch, or tag — it's resolved before any git command runs.
+func (s *Store) CommitDetail(repoID int64, ref string) (Commit, []FileDiff, error) {
+	r, err := s.open(repoID)
+	if err != nil {
+		return Commit{}, nil, err
+	}
+	commit, err := s.resolveRef(r, ref)
+	if err != nil {
+		return Commit{}, nil, fmt.Errorf("commit not found: %s", ref)
+	}
+	sha := commit.Hash.String()
+	meta := Commit{
+		SHA:     sha,
+		Short:   sha[:7],
+		Message: strings.TrimRight(commit.Message, "\n"),
+		Author:  commit.Author.Name,
+		Email:   commit.Author.Email,
+		Date:    commit.Author.When.UTC().Format("2006-01-02T15:04:05Z"),
+	}
+	base := sha + "^"
+	if commit.NumParents() == 0 {
+		base = emptyTreeSHA
+	}
+	files, _ := s.Diff(repoID, base, sha)
+	return meta, files, nil
+}
+
 // Tags lists tags (name + target sha), newest-ish first by name desc.
 func (s *Store) Tags(repoID int64) ([]Branch, error) {
 	out, err := exec.Command("git", "-C", s.Path(repoID),

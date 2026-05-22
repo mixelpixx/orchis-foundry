@@ -2253,6 +2253,8 @@ function Sidebar({
     }
   }, "avery / kelp")), /*#__PURE__*/React.createElement("div", {
     className: "spacer"
+  }), /*#__PURE__*/React.createElement(NotificationsBell, {
+    setRoute: setRoute
   }), /*#__PURE__*/React.createElement("button", {
     className: "btn ghost icon",
     onClick: () => setTheme(theme === "dark" ? "light" : "dark"),
@@ -2383,6 +2385,181 @@ function Sidebar({
       color: "var(--fg-3)"
     }
   }))));
+}
+
+// NotificationsBell — global inbox affordance. Shows an unread badge, opens a
+// dropdown of inbox items, and refreshes live via the SSE inbox:me topic.
+// Unread is tracked client-side (localStorage seen-keys) — no backend change.
+function NotificationsBell({
+  setRoute
+}) {
+  const [items, setItems] = React.useState([]);
+  const [open, setOpen] = React.useState(false);
+  const [seen, setSeen] = React.useState(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem("orchis-inbox-seen") || "[]"));
+    } catch (e) {
+      return new Set();
+    }
+  });
+  const itemKey = it => [it.title, it.repo || "", it.detail || ""].join("|");
+  const persistSeen = s => {
+    try {
+      localStorage.setItem("orchis-inbox-seen", JSON.stringify([...s]));
+    } catch (e) {}
+  };
+  const load = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get("/v1/me/inbox").then(x => setItems(x || [])).catch(() => setItems([]));
+  }, []);
+  React.useEffect(() => {
+    load();
+  }, [load]);
+  React.useEffect(() => {
+    if (!window.EventSource) return;
+    const es = new EventSource("/v1/stream?topics=inbox:me");
+    es.addEventListener("inbox.new", load);
+    return () => es.close();
+  }, [load]);
+  const unread = items.filter(it => !seen.has(itemKey(it))).length;
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && items.length) {
+      const s = new Set(seen);
+      items.forEach(it => s.add(itemKey(it)));
+      setSeen(s);
+      persistSeen(s);
+    }
+  };
+  const go = it => {
+    setOpen(false);
+    if (it.route) setRoute(it.route);
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "relative"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost icon",
+    onClick: toggle,
+    title: "Notifications",
+    style: {
+      position: "relative"
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Bell, null), unread > 0 ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: "absolute",
+      top: 3,
+      right: 3,
+      minWidth: 14,
+      height: 14,
+      padding: "0 3px",
+      borderRadius: 999,
+      background: "var(--accent)",
+      color: "var(--accent-fg)",
+      fontSize: 9,
+      fontWeight: 600,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      lineHeight: 1
+    }
+  }, unread > 9 ? "9+" : unread) : null), open ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    onClick: () => setOpen(false),
+    style: {
+      position: "fixed",
+      inset: 0,
+      zIndex: 90
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "card fade-in",
+    style: {
+      position: "absolute",
+      top: "calc(100% + 6px)",
+      right: 0,
+      width: 320,
+      maxHeight: 420,
+      overflowY: "auto",
+      zIndex: 91,
+      boxShadow: "var(--shadow-lg)",
+      padding: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      padding: "6px 8px 8px"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, "Notifications"), /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "subtle",
+    style: {
+      fontSize: 11
+    }
+  }, items.length, " item", items.length === 1 ? "" : "s")), items.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "16px 10px",
+      color: "var(--fg-3)",
+      fontSize: 12.5,
+      textAlign: "center"
+    }
+  }, "You're all caught up.") : items.map((it, i) => /*#__PURE__*/React.createElement("button", {
+    key: i,
+    onClick: () => go(it),
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 2,
+      width: "100%",
+      textAlign: "left",
+      padding: "9px 10px",
+      borderRadius: 6,
+      background: "transparent",
+      border: "none",
+      cursor: "pointer",
+      font: "inherit",
+      color: "inherit"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 6,
+      height: 6,
+      borderRadius: 999,
+      background: it.kind === "warn" ? "var(--warn)" : "var(--accent)",
+      flexShrink: 0
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12.5,
+      fontWeight: 500
+    }
+  }, it.title), /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "mono subtle",
+    style: {
+      fontSize: 10.5
+    }
+  }, it.repo)), /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5,
+      paddingLeft: 12,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, it.detail))))) : null);
 }
 const sbStyles = {
   aside: {
@@ -3351,7 +3528,8 @@ function RepoView({
     active: active,
     tab: tab,
     setTab: setTab,
-    setActive: onPickFile
+    setActive: onPickFile,
+    setRoute: setRoute
   })), /*#__PURE__*/React.createElement("div", {
     style: repoStyles.mainResizer,
     onMouseDown: startMainResize
@@ -3554,6 +3732,15 @@ function RepoHeader({
       fontSize: 10
     }
   }, "3")), /*#__PURE__*/React.createElement("button", {
+    className: "btn sm",
+    onClick: () => setRoute({
+      view: "newpr",
+      repo: repo.id
+    }),
+    title: "Open a pull request"
+  }, /*#__PURE__*/React.createElement(Icons.Plus, {
+    size: 12
+  }), " PR"), /*#__PURE__*/React.createElement("button", {
     className: "btn sm",
     onClick: () => openSplit({
       type: "issues",
@@ -3964,7 +4151,8 @@ function RepoMainPanel({
   active,
   tab,
   setTab,
-  setActive
+  setActive,
+  setRoute
 }) {
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: repoStyles.subtabs
@@ -3981,6 +4169,12 @@ function RepoMainPanel({
       size: 12
     })
   }, "Readme"), /*#__PURE__*/React.createElement(Subtab, {
+    active: tab === "commits",
+    onClick: () => setTab("commits"),
+    icon: /*#__PURE__*/React.createElement(Icons.Commit, {
+      size: 12
+    })
+  }, "Commits"), /*#__PURE__*/React.createElement(Subtab, {
     active: tab === "activity",
     onClick: () => setTab("activity"),
     icon: /*#__PURE__*/React.createElement(Icons.Activity, {
@@ -3992,22 +4186,7 @@ function RepoMainPanel({
     icon: /*#__PURE__*/React.createElement(Icons.Tag, {
       size: 12
     })
-  }, "Releases"), /*#__PURE__*/React.createElement("span", {
-    className: "spacer"
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "row",
-    style: {
-      gap: 8,
-      color: "var(--fg-2)",
-      fontSize: 12
-    }
-  }, /*#__PURE__*/React.createElement(Icons.Commit, {
-    size: 12
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "mono"
-  }, "a3f9c12"), /*#__PURE__*/React.createElement("span", {
-    className: "subtle"
-  }, "by Jana, 12 min ago"))), /*#__PURE__*/React.createElement("div", {
+  }, "Releases")), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       minHeight: 0,
@@ -4018,12 +4197,115 @@ function RepoMainPanel({
     path: active
   }) : null, tab === "readme" ? /*#__PURE__*/React.createElement(ReadmeView, {
     repoId: repoId
+  }) : null, tab === "commits" ? /*#__PURE__*/React.createElement(RepoCommitsList, {
+    repoId: repoId,
+    repo: repo,
+    setRoute: setRoute
   }) : null, tab === "activity" ? /*#__PURE__*/React.createElement(RecentActivityView, {
     repoId: repoId
   }) : null, tab === "releases" ? /*#__PURE__*/React.createElement(ReleasesView, {
     repo: repo,
     repoId: repoId
   }) : null));
+}
+
+// RepoCommitsList — commit history for the repo's default branch; rows open the
+// commit detail view.
+function RepoCommitsList({
+  repoId,
+  repo,
+  setRoute
+}) {
+  const [commits, setCommits] = React.useState(null);
+  React.useEffect(() => {
+    if (window.OrchisAPI && repoId) window.OrchisAPI.get(`/v1/repos/${repoId}/commits?limit=100`).then(setCommits).catch(() => setCommits([]));
+  }, [repoId]);
+  const list = commits || [];
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "20px 24px",
+      maxWidth: 900
+    }
+  }, commits == null ? /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12.5
+    }
+  }, "Loading\u2026") : null, commits != null && list.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "20px 18px",
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "No commits yet.") : null, list.length > 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      overflow: "hidden"
+    }
+  }, list.map((c, i) => /*#__PURE__*/React.createElement("button", {
+    key: c.sha,
+    onClick: () => setRoute({
+      view: "commit",
+      repo: repoId,
+      sha: c.sha
+    }),
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      width: "100%",
+      textAlign: "left",
+      padding: "11px 14px",
+      background: "transparent",
+      border: "none",
+      borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none",
+      cursor: "pointer",
+      font: "inherit",
+      color: "inherit"
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Commit, {
+    size: 14,
+    style: {
+      color: "var(--fg-2)"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      fontWeight: 450,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, c.message.split("\n")[0]), /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5,
+      marginTop: 2
+    }
+  }, c.author, " \xB7 ", relativeDate(c.date))), /*#__PURE__*/React.createElement("span", {
+    className: "mono subtle",
+    style: {
+      fontSize: 11.5
+    }
+  }, c.short)))) : null);
+}
+
+// relativeDate renders an ISO date compactly (the API already sends UTC ISO).
+function relativeDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
 }
 function Subtab({
   active,
@@ -5849,7 +6131,9 @@ function PRView({
     comments: comments,
     postComment: postComment
   }) : null, tab === "commits" ? /*#__PURE__*/React.createElement(CommitsList, {
-    commits: commits
+    commits: commits,
+    repo: repo,
+    setRoute: setRoute
   }) : null, tab === "checks" ? /*#__PURE__*/React.createElement(ChecksList, {
     checks: checks
   }) : null), reviewing ? /*#__PURE__*/React.createElement(ReviewBar, {
@@ -6106,6 +6390,75 @@ function FileDiff({
     }) : null);
   })))));
 }
+
+// ReadOnlyDiff renders a list of FileDiffs without the comment machinery —
+// used by the compare (new PR) and commit-detail views.
+function ReadOnlyDiff({
+  files
+}) {
+  if (!files || files.length === 0) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "muted",
+      style: {
+        fontSize: 12.5,
+        padding: "12px 4px"
+      }
+    }, "No file changes.");
+  }
+  return /*#__PURE__*/React.createElement(React.Fragment, null, files.map((file, fi) => /*#__PURE__*/React.createElement("div", {
+    key: fi,
+    className: "card",
+    style: {
+      marginBottom: 14,
+      overflow: "hidden"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: prStyles.fileHead
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 12.5,
+      fontWeight: 500
+    }
+  }, file.path), /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: {
+      height: 18
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--accent)"
+    }
+  }, "+", file.additions)), /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: {
+      height: 18
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--danger)"
+    }
+  }, "\u2212", file.deletions))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowX: "auto"
+    }
+  }, (file.hunks || []).map((h, hi) => /*#__PURE__*/React.createElement("div", {
+    key: hi
+  }, /*#__PURE__*/React.createElement("div", {
+    style: prStyles.hunkHead
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 11.5,
+      color: "var(--fg-2)"
+    }
+  }, h.header)), h.lines.map((ln, li) => /*#__PURE__*/React.createElement(DiffLine, {
+    key: li,
+    ln: ln,
+    canComment: false
+  }))))))));
+}
+window.ReadOnlyDiff = ReadOnlyDiff;
 function DiffLine({
   ln,
   onComment,
@@ -6413,7 +6766,9 @@ function ConvBlock({
   }, children)));
 }
 function CommitsList({
-  commits
+  commits,
+  repo,
+  setRoute
 }) {
   // Real commits: {sha, short, message, author, email, date}. Fallback to mock when null (offline).
   const mock = [{
@@ -6428,6 +6783,13 @@ function CommitsList({
     date: ""
   }];
   const list = commits != null ? commits : mock;
+  const open = c => {
+    if (setRoute && repo && c.sha) setRoute({
+      view: "commit",
+      repo,
+      sha: c.sha
+    });
+  };
   return /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: 820,
@@ -6446,14 +6808,22 @@ function CommitsList({
     style: {
       padding: 4
     }
-  }, list.map((c, i) => /*#__PURE__*/React.createElement("div", {
+  }, list.map((c, i) => /*#__PURE__*/React.createElement("button", {
     key: c.sha || i,
+    onClick: () => open(c),
     style: {
       display: "flex",
       alignItems: "center",
       gap: 12,
+      width: "100%",
+      textAlign: "left",
       padding: "10px 14px",
-      borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none"
+      borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none",
+      background: "transparent",
+      border: "none",
+      cursor: c.sha ? "pointer" : "default",
+      font: "inherit",
+      color: "inherit"
     }
   }, /*#__PURE__*/React.createElement(Icons.Commit, {
     size: 14,
@@ -6820,6 +7190,8 @@ function PRsView({
       padding: "32px 32px 60px"
     },
     className: "fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row"
   }, /*#__PURE__*/React.createElement("h1", {
     style: {
       fontSize: 26,
@@ -6827,7 +7199,16 @@ function PRsView({
       letterSpacing: "-0.02em",
       margin: "0 0 6px"
     }
-  }, "Pull requests"), /*#__PURE__*/React.createElement("p", {
+  }, "Pull requests"), /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn primary sm",
+    onClick: () => setRoute({
+      view: "newpr"
+    })
+  }, /*#__PURE__*/React.createElement(Icons.Plus, {
+    size: 13
+  }), " New pull request")), /*#__PURE__*/React.createElement("p", {
     className: "muted",
     style: {
       marginTop: 0,
@@ -8620,6 +9001,439 @@ const searchStyles = {
 };
 window.SearchView = SearchView;
 
+// ===== src/views/newpr.jsx =====
+// Open-a-PR — compare two branches and create a pull request.
+function NewPRView({
+  route,
+  setRoute
+}) {
+  const [repo, setRepo] = React.useState(route && route.repo || "");
+  const [repos, setRepos] = React.useState([]);
+  const [branches, setBranches] = React.useState([]);
+  const [base, setBase] = React.useState("");
+  const [head, setHead] = React.useState(route && route.head || "");
+  const [cmp, setCmp] = React.useState(null);
+  const [title, setTitle] = React.useState("");
+  const [body, setBody] = React.useState("");
+  const [reviewer, setReviewer] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  const titleTouched = React.useRef(false);
+
+  // If no repo given, offer a picker (owned repos).
+  React.useEffect(() => {
+    if (!repo && window.OrchisAPI) window.OrchisAPI.get("/v1/repos").then(rs => setRepos(rs || [])).catch(() => {});
+  }, [repo]);
+
+  // Load branches for the chosen repo; seed base = default branch.
+  React.useEffect(() => {
+    if (!repo || !window.OrchisAPI) return;
+    window.OrchisAPI.get(`/v1/repos/${repo}/branches`).then(bs => {
+      setBranches(bs || []);
+      const def = (bs || []).find(b => b.isDefault);
+      if (def && !base) setBase(def.name);
+    }).catch(() => {});
+  }, [repo]);
+
+  // Compare whenever base+head are both set and differ.
+  React.useEffect(() => {
+    if (!repo || !base || !head || base === head || !window.OrchisAPI) {
+      setCmp(null);
+      return;
+    }
+    let cancelled = false;
+    window.OrchisAPI.get(`/v1/repos/${repo}/compare?base=${encodeURIComponent(base)}&head=${encodeURIComponent(head)}`).then(res => {
+      if (cancelled) return;
+      setCmp(res);
+      if (!titleTouched.current && res.commits && res.commits.length) {
+        setTitle(res.commits[0].message.split("\n")[0]);
+      }
+    }).catch(() => {
+      if (!cancelled) setCmp(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo, base, head]);
+  const create = async () => {
+    if (!repo || !head || !title.trim()) return;
+    setErr("");
+    setBusy(true);
+    try {
+      const pr = await window.OrchisAPI.post(`/v1/repos/${repo}/pulls`, {
+        title: title.trim(),
+        head,
+        base,
+        body
+      });
+      if (reviewer.trim()) {
+        await window.OrchisAPI.post(`/v1/repos/${repo}/pulls/${pr.id}/request-review`, {
+          reviewer: reviewer.trim()
+        }).catch(() => {});
+      }
+      setRoute({
+        view: "pr",
+        pr: pr.id,
+        repo
+      });
+    } catch (e) {
+      setErr("Could not open the PR — the head branch may have no new commits, or you lack write access.");
+      setBusy(false);
+    }
+  };
+  const branchOpts = branches.map(b => b.name);
+  const canCompare = repo && base && head && base !== head;
+  return /*#__PURE__*/React.createElement("div", {
+    style: npStyles.scroll
+  }, /*#__PURE__*/React.createElement("div", {
+    style: npStyles.page,
+    className: "fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement(Icons.PR, {
+    size: 18,
+    style: {
+      color: "var(--accent)"
+    }
+  }), /*#__PURE__*/React.createElement("h1", {
+    style: {
+      fontSize: 20,
+      fontWeight: 500,
+      margin: "0 0 0 8px"
+    }
+  }, "Open a pull request")), err ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "8px 12px",
+      border: "1px solid var(--danger)",
+      borderRadius: 6,
+      color: "var(--danger)",
+      fontSize: 12.5,
+      marginBottom: 14
+    }
+  }, err) : null, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 14,
+      marginBottom: 16,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10
+    }
+  }, !route || !route.repo ? /*#__PURE__*/React.createElement(Field, {
+    label: "Repository"
+  }, /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: repo,
+    onChange: e => {
+      setRepo(e.target.value);
+      setBase("");
+      setHead("");
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Choose a repo\u2026"), repos.map(r => /*#__PURE__*/React.createElement("option", {
+    key: r.id,
+    value: r.id
+  }, r.id)))) : null, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 10,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 180
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "section-title",
+    style: {
+      marginBottom: 4
+    }
+  }, "Base (merge into)"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: base,
+    onChange: e => setBase(e.target.value),
+    disabled: !repo
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "base\u2026"), branchOpts.map(b => /*#__PURE__*/React.createElement("option", {
+    key: b,
+    value: b
+  }, b)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      alignSelf: "flex-end",
+      padding: "0 4px 8px",
+      color: "var(--fg-3)"
+    }
+  }, "\u2190"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 180
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "section-title",
+    style: {
+      marginBottom: 4
+    }
+  }, "Compare (head)"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: head,
+    onChange: e => setHead(e.target.value),
+    disabled: !repo
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "head\u2026"), branchOpts.map(b => /*#__PURE__*/React.createElement("option", {
+    key: b,
+    value: b
+  }, b))))), canCompare && cmp ? /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 12
+    }
+  }, cmp.aheadBy, " commit", cmp.aheadBy === 1 ? "" : "s", " \xB7 ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--accent)"
+    }
+  }, "+", cmp.additions), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--danger)"
+    }
+  }, "\u2212", cmp.deletions), " \xB7 ", cmp.filesCount, " file", cmp.filesCount === 1 ? "" : "s") : canCompare ? /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 12
+    }
+  }, "Comparing\u2026") : null), canCompare && cmp && cmp.aheadBy === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "16px 18px",
+      color: "var(--fg-3)",
+      fontSize: 13,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mono"
+  }, head), " is not ahead of ", /*#__PURE__*/React.createElement("span", {
+    className: "mono"
+  }, base), " \u2014 nothing to merge.") : null, canCompare && cmp && cmp.aheadBy > 0 ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 14,
+      marginBottom: 16,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Title"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: title,
+    onChange: e => {
+      titleTouched.current = true;
+      setTitle(e.target.value);
+    },
+    placeholder: "Pull request title"
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Description"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    value: body,
+    onChange: e => setBody(e.target.value),
+    placeholder: "What does this change and why?",
+    style: {
+      width: "100%",
+      height: 110,
+      padding: 10,
+      border: "1px solid var(--line)",
+      borderRadius: 6,
+      fontFamily: "inherit",
+      fontSize: 13,
+      background: "var(--bg-1)",
+      color: "var(--fg)",
+      resize: "vertical"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement(Field, {
+    label: "Request a reviewer (optional)"
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: reviewer,
+    onChange: e => setReviewer(e.target.value),
+    placeholder: "handle"
+  }))), /*#__PURE__*/React.createElement("button", {
+    className: "btn primary",
+    style: {
+      alignSelf: "flex-end",
+      height: 36
+    },
+    disabled: busy || !title.trim(),
+    onClick: create
+  }, busy ? "Opening…" : "Create pull request"))), /*#__PURE__*/React.createElement("div", {
+    className: "section-title",
+    style: {
+      margin: "0 0 8px"
+    }
+  }, cmp.commits.length, " commit", cmp.commits.length === 1 ? "" : "s"), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 16,
+      overflow: "hidden"
+    }
+  }, cmp.commits.map((c, i) => /*#__PURE__*/React.createElement("div", {
+    key: c.sha,
+    className: "row",
+    style: {
+      gap: 10,
+      padding: "9px 14px",
+      borderBottom: i < cmp.commits.length - 1 ? "1px solid var(--line)" : "none"
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Commit, {
+    size: 13,
+    style: {
+      color: "var(--fg-2)"
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 13,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, c.message.split("\n")[0]), /*#__PURE__*/React.createElement("span", {
+    className: "mono subtle",
+    style: {
+      fontSize: 11
+    }
+  }, c.short)))), /*#__PURE__*/React.createElement("div", {
+    className: "section-title",
+    style: {
+      margin: "0 0 8px"
+    }
+  }, "Changes"), /*#__PURE__*/React.createElement(ReadOnlyDiff, {
+    files: cmp.files
+  })) : null));
+}
+const npStyles = {
+  scroll: {
+    height: "100%",
+    overflowY: "auto"
+  },
+  page: {
+    maxWidth: 940,
+    margin: "0 auto",
+    padding: "28px 24px 60px"
+  }
+};
+window.NewPRView = NewPRView;
+
+// ===== src/views/commit.jsx =====
+// Commit detail — message, author, and the commit's diff.
+function CommitView({
+  route,
+  setRoute
+}) {
+  const repo = route.repo;
+  const sha = route.sha;
+  const [data, setData] = React.useState(null);
+  const [err, setErr] = React.useState(false);
+  React.useEffect(() => {
+    if (!window.OrchisAPI || !repo || !sha) return;
+    setData(null);
+    setErr(false);
+    window.OrchisAPI.get(`/v1/repos/${repo}/commits/${sha}`).then(setData).catch(() => setErr(true));
+  }, [repo, sha]);
+  return /*#__PURE__*/React.createElement("div", {
+    style: cvStyles.scroll
+  }, /*#__PURE__*/React.createElement("div", {
+    style: cvStyles.page,
+    className: "fade-in"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    style: {
+      marginBottom: 12
+    },
+    onClick: () => setRoute({
+      view: "repo",
+      repo
+    })
+  }, "\u2190 ", repo), err ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 18,
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "Commit not found.") : null, !data && !err ? /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12.5
+    }
+  }, "Loading\u2026") : null, data ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 16,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 16,
+      fontWeight: 500,
+      whiteSpace: "pre-wrap",
+      marginBottom: 8
+    }
+  }, data.message), /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 10,
+      fontSize: 12,
+      color: "var(--fg-2)"
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Commit, {
+    size: 13
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "mono"
+  }, data.short), /*#__PURE__*/React.createElement("span", null, "\xB7"), /*#__PURE__*/React.createElement("span", null, data.author), /*#__PURE__*/React.createElement("span", {
+    className: "subtle"
+  }, data.email), /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--accent)"
+    }
+  }, "+", data.additions), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--danger)"
+    }
+  }, "\u2212", data.deletions))), /*#__PURE__*/React.createElement(ReadOnlyDiff, {
+    files: data.files
+  })) : null));
+}
+const cvStyles = {
+  scroll: {
+    height: "100%",
+    overflowY: "auto"
+  },
+  page: {
+    maxWidth: 940,
+    margin: "0 auto",
+    padding: "24px 24px 60px"
+  }
+};
+window.CommitView = CommitView;
+
 // ===== src/app.jsx =====
 // Main app — shell, routing, command palette, tweaks.
 
@@ -8768,6 +9582,12 @@ function App() {
     repo: route.repo,
     setRoute: navigate
   });else if (route.view === "search") view = /*#__PURE__*/React.createElement(SearchView, {
+    route: route,
+    setRoute: navigate
+  });else if (route.view === "newpr") view = /*#__PURE__*/React.createElement(NewPRView, {
+    route: route,
+    setRoute: navigate
+  });else if (route.view === "commit") view = /*#__PURE__*/React.createElement(CommitView, {
     route: route,
     setRoute: navigate
   });else if (route.view === "settings") view = /*#__PURE__*/React.createElement(DevSettingsView, {

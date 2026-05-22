@@ -41,6 +41,8 @@ const SOURCES = [
   "src/views/pr.jsx",
   "src/views/devsettings.jsx",
   "src/views/search.jsx",
+  "src/views/newpr.jsx",
+  "src/views/commit.jsx",
   "src/app.jsx",
 ];
 
