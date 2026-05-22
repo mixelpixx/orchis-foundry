@@ -3365,6 +3365,7 @@ function RepoView({
     }
   }, /*#__PURE__*/React.createElement(RepoMainPanel, {
     repo: repo,
+    repoId: repoId,
     active: active,
     tab: tab,
     setTab: setTab,
@@ -3972,7 +3973,13 @@ function RepoMainPanel({
     icon: /*#__PURE__*/React.createElement(Icons.Activity, {
       size: 12
     })
-  }, "Activity"), /*#__PURE__*/React.createElement("span", {
+  }, "Activity"), /*#__PURE__*/React.createElement(Subtab, {
+    active: tab === "releases",
+    onClick: () => setTab("releases"),
+    icon: /*#__PURE__*/React.createElement(Icons.Tag, {
+      size: 12
+    })
+  }, "Releases"), /*#__PURE__*/React.createElement("span", {
     className: "spacer"
   }), /*#__PURE__*/React.createElement("span", {
     className: "row",
@@ -3999,6 +4006,9 @@ function RepoMainPanel({
   }) : null, tab === "readme" ? /*#__PURE__*/React.createElement(ReadmeView, {
     repoId: repoId
   }) : null, tab === "activity" ? /*#__PURE__*/React.createElement(RecentActivityView, {
+    repoId: repoId
+  }) : null, tab === "releases" ? /*#__PURE__*/React.createElement(ReleasesView, {
+    repo: repo,
     repoId: repoId
   }) : null));
 }
@@ -4852,6 +4862,258 @@ function ActionsSplit({
     target: "_blank",
     rel: "noreferrer"
   }, "View") : null)));
+}
+
+// Releases — list + (owner) publish + download source tarball.
+function ReleasesView({
+  repo,
+  repoId
+}) {
+  const isOwner = !!(window.USERS && USERS.me && repo.org === USERS.me.handle);
+  const [items, setItems] = React.useState(null);
+  const [creating, setCreating] = React.useState(false);
+  const [tag, setTag] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [body, setBody] = React.useState("");
+  const [prerelease, setPrerelease] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  const reload = React.useCallback(() => {
+    if (window.OrchisAPI && repoId) window.OrchisAPI.get(`/v1/repos/${repoId}/releases`).then(setItems).catch(() => setItems([]));
+  }, [repoId]);
+  React.useEffect(() => {
+    reload();
+  }, [reload]);
+  const list = items != null ? items : [];
+  const publish = async () => {
+    if (!tag.trim()) return;
+    setErr("");
+    setBusy(true);
+    try {
+      await window.OrchisAPI.post(`/v1/repos/${repoId}/releases`, {
+        tag: tag.trim(),
+        name: name.trim(),
+        body: body.trim(),
+        prerelease
+      });
+      setTag("");
+      setName("");
+      setBody("");
+      setPrerelease(false);
+      setCreating(false);
+      reload();
+    } catch (e) {
+      setErr("Could not publish — the tag may be invalid or already released.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async t => {
+    try {
+      await window.OrchisAPI.del(`/v1/repos/${repoId}/releases/${t}`);
+      reload();
+    } catch (e) {}
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "20px 24px",
+      maxWidth: 820
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontSize: 16,
+      fontWeight: 500,
+      margin: 0
+    }
+  }, "Releases"), /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), isOwner && window.OrchisAPI ? /*#__PURE__*/React.createElement("button", {
+    className: "btn primary sm",
+    onClick: () => {
+      setErr("");
+      setCreating(c => !c);
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Tag, {
+    size: 12
+  }), " Draft a release") : null), err ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "8px 12px",
+      border: "1px solid var(--danger)",
+      borderRadius: 6,
+      color: "var(--danger)",
+      fontSize: 12.5,
+      marginBottom: 12
+    }
+  }, err) : null, creating ? /*#__PURE__*/React.createElement("div", {
+    className: "card fade-in",
+    style: {
+      padding: 16,
+      marginBottom: 16,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: tag,
+    onChange: e => setTag(e.target.value),
+    placeholder: "tag e.g. v1.0.0",
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: name,
+    onChange: e => setName(e.target.value),
+    placeholder: "release name (optional)",
+    style: {
+      flex: 1
+    }
+  })), /*#__PURE__*/React.createElement("textarea", {
+    value: body,
+    onChange: e => setBody(e.target.value),
+    placeholder: "Release notes (markdown)\u2026",
+    style: {
+      width: "100%",
+      height: 100,
+      padding: 10,
+      border: "1px solid var(--line)",
+      borderRadius: 6,
+      fontFamily: "inherit",
+      fontSize: 13,
+      background: "var(--bg-1)",
+      color: "var(--fg)",
+      resize: "vertical"
+    }
+  }), /*#__PURE__*/React.createElement("label", {
+    className: "row",
+    style: {
+      gap: 8,
+      fontSize: 12.5,
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: prerelease,
+    onChange: e => setPrerelease(e.target.checked)
+  }), " Mark as pre-release"), /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5
+    }
+  }, "Tagged from ", /*#__PURE__*/React.createElement("span", {
+    className: "mono"
+  }, repo.defaultBranch || "main"), " if the tag doesn't exist yet."), /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn sm",
+    onClick: () => setCreating(false)
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    className: "btn primary sm",
+    disabled: !tag.trim() || busy,
+    onClick: publish
+  }, busy ? "Publishing…" : "Publish release"))) : null, list.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "20px 18px",
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "No releases yet.") : list.map(rel => /*#__PURE__*/React.createElement("div", {
+    key: rel.tag,
+    className: "card",
+    style: {
+      padding: 16,
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Tag, {
+    size: 14,
+    style: {
+      color: "var(--accent)"
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 15,
+      fontWeight: 500
+    }
+  }, rel.name), /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: {
+      height: 18,
+      fontSize: 10.5
+    }
+  }, rel.tag), rel.prerelease ? /*#__PURE__*/React.createElement("span", {
+    className: "chip warn",
+    style: {
+      height: 18,
+      fontSize: 10.5
+    }
+  }, "pre-release") : null, /*#__PURE__*/React.createElement("span", {
+    className: "mono subtle",
+    style: {
+      fontSize: 11
+    }
+  }, rel.sha), /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5
+    }
+  }, rel.created)), rel.body ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      lineHeight: 1.5,
+      whiteSpace: "pre-wrap",
+      color: "var(--fg-1)",
+      margin: "4px 0 10px"
+    }
+  }, rel.body) : null, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("a", {
+    className: "btn sm",
+    href: rel.tarball,
+    download: true
+  }, /*#__PURE__*/React.createElement(Icons.File, {
+    size: 12
+  }), " Source (.tar.gz)"), rel.author ? /*#__PURE__*/React.createElement("span", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5
+    }
+  }, "by ", rel.author.name) : null, /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), isOwner ? /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    style: {
+      color: "var(--danger)"
+    },
+    onClick: () => remove(rel.tag)
+  }, "Delete") : null))));
 }
 const repoStyles = {
   shell: {

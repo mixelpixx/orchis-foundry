@@ -58,6 +58,12 @@
       "delete": { "summary": "Delete a repo", "responses": { "204": { "description": "Deleted" } } }
     },
     "/repos/{org}/{name}/tags": { "get": { "summary": "List tags", "responses": { "200": { "description": "[Tag]" } } } },
+    "/repos/{org}/{name}/releases": {
+      "get": { "summary": "List releases", "responses": { "200": { "description": "[Release]" } } },
+      "post": { "summary": "Publish a release (owner only; creates the tag if missing)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "tag": { "type": "string" }, "name": { "type": "string" }, "body": { "type": "string" }, "target": { "type": "string" }, "prerelease": { "type": "boolean" } }, "required": ["tag"] } } } }, "responses": { "200": { "description": "Release" } } }
+    },
+    "/repos/{org}/{name}/releases/{tag}": { "delete": { "summary": "Delete a release + its tag (owner only)", "parameters": [{ "name": "tag", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "Deleted" } } } },
+    "/repos/{org}/{name}/releases/{tag}/tarball": { "get": { "summary": "Download release source as .tar.gz", "parameters": [{ "name": "tag", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "application/gzip" } } } },
     "/repos/{org}/{name}/tree": { "get": { "summary": "File tree (nested)", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }], "responses": { "200": { "description": "[Node]" } } } },
     "/repos/{org}/{name}/blob": { "get": { "summary": "File contents", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }, { "name": "path", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Blob {content,lang,size,lines}" } } } },
     "/repos/{org}/{name}/raw": { "get": { "summary": "Raw file bytes", "responses": { "200": { "description": "bytes" } } } },

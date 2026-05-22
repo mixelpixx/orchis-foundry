@@ -131,7 +131,7 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
             </>
           ) : (
             <div style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <RepoMainPanel repo={repo} active={active} tab={tab} setTab={setTab} setActive={onPickFile} />
+              <RepoMainPanel repo={repo} repoId={repoId} active={active} tab={tab} setTab={setTab} setActive={onPickFile} />
             </div>
           )}
         </div>
@@ -380,6 +380,7 @@ function RepoMainPanel({ repo, repoId, active, tab, setTab, setActive }) {
         <Subtab active={tab === "code"} onClick={() => setTab("code")} icon={<Icons.Code size={12} />}>Code</Subtab>
         <Subtab active={tab === "readme"} onClick={() => setTab("readme")} icon={<Icons.Book size={12} />}>Readme</Subtab>
         <Subtab active={tab === "activity"} onClick={() => setTab("activity")} icon={<Icons.Activity size={12} />}>Activity</Subtab>
+        <Subtab active={tab === "releases"} onClick={() => setTab("releases")} icon={<Icons.Tag size={12} />}>Releases</Subtab>
         <span className="spacer" />
         <span className="row" style={{ gap: 8, color: "var(--fg-2)", fontSize: 12 }}>
           <Icons.Commit size={12} />
@@ -392,6 +393,7 @@ function RepoMainPanel({ repo, repoId, active, tab, setTab, setActive }) {
         {tab === "code" ? <CodeView repoId={repoId} path={active} /> : null}
         {tab === "readme" ? <ReadmeView repoId={repoId} /> : null}
         {tab === "activity" ? <RecentActivityView repoId={repoId} /> : null}
+        {tab === "releases" ? <ReleasesView repo={repo} repoId={repoId} /> : null}
       </div>
     </>
   );
@@ -816,6 +818,95 @@ function ActionsSplit({ repo }) {
             <div className="subtle" style={{ fontSize: 11, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.detail || r.status}{r.when ? " · " + r.when : ""}</div>
           </div>
           {r.externalUrl ? <a className="btn ghost sm" href={r.externalUrl} target="_blank" rel="noreferrer">View</a> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Releases — list + (owner) publish + download source tarball.
+function ReleasesView({ repo, repoId }) {
+  const isOwner = !!(window.USERS && USERS.me && repo.org === USERS.me.handle);
+  const [items, setItems] = React.useState(null);
+  const [creating, setCreating] = React.useState(false);
+  const [tag, setTag] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [body, setBody] = React.useState("");
+  const [prerelease, setPrerelease] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+
+  const reload = React.useCallback(() => {
+    if (window.OrchisAPI && repoId) window.OrchisAPI.get(`/v1/repos/${repoId}/releases`).then(setItems).catch(() => setItems([]));
+  }, [repoId]);
+  React.useEffect(() => { reload(); }, [reload]);
+  const list = items != null ? items : [];
+
+  const publish = async () => {
+    if (!tag.trim()) return;
+    setErr(""); setBusy(true);
+    try {
+      await window.OrchisAPI.post(`/v1/repos/${repoId}/releases`, { tag: tag.trim(), name: name.trim(), body: body.trim(), prerelease });
+      setTag(""); setName(""); setBody(""); setPrerelease(false); setCreating(false); reload();
+    } catch (e) { setErr("Could not publish — the tag may be invalid or already released."); }
+    finally { setBusy(false); }
+  };
+  const remove = async (t) => {
+    try { await window.OrchisAPI.del(`/v1/repos/${repoId}/releases/${t}`); reload(); } catch (e) {}
+  };
+
+  return (
+    <div style={{ padding: "20px 24px", maxWidth: 820 }}>
+      <div className="row" style={{ marginBottom: 14 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 500, margin: 0 }}>Releases</h2>
+        <span className="spacer" />
+        {isOwner && window.OrchisAPI ? <button className="btn primary sm" onClick={() => { setErr(""); setCreating(c => !c); }}><Icons.Tag size={12} /> Draft a release</button> : null}
+      </div>
+
+      {err ? <div style={{ padding: "8px 12px", border: "1px solid var(--danger)", borderRadius: 6, color: "var(--danger)", fontSize: 12.5, marginBottom: 12 }}>{err}</div> : null}
+
+      {creating ? (
+        <div className="card fade-in" style={{ padding: 16, marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="input" value={tag} onChange={e => setTag(e.target.value)} placeholder="tag e.g. v1.0.0" style={{ flex: 1 }} />
+            <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="release name (optional)" style={{ flex: 1 }} />
+          </div>
+          <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Release notes (markdown)…" style={{
+            width: "100%", height: 100, padding: 10, border: "1px solid var(--line)", borderRadius: 6,
+            fontFamily: "inherit", fontSize: 13, background: "var(--bg-1)", color: "var(--fg)", resize: "vertical",
+          }} />
+          <label className="row" style={{ gap: 8, fontSize: 12.5, cursor: "pointer" }}>
+            <input type="checkbox" checked={prerelease} onChange={e => setPrerelease(e.target.checked)} /> Mark as pre-release
+          </label>
+          <div className="row" style={{ gap: 8 }}>
+            <span className="subtle" style={{ fontSize: 11.5 }}>Tagged from <span className="mono">{repo.defaultBranch || "main"}</span> if the tag doesn't exist yet.</span>
+            <span className="spacer" />
+            <button className="btn sm" onClick={() => setCreating(false)}>Cancel</button>
+            <button className="btn primary sm" disabled={!tag.trim() || busy} onClick={publish}>{busy ? "Publishing…" : "Publish release"}</button>
+          </div>
+        </div>
+      ) : null}
+
+      {list.length === 0 ? (
+        <div className="card" style={{ padding: "20px 18px", color: "var(--fg-3)", fontSize: 13 }}>No releases yet.</div>
+      ) : list.map(rel => (
+        <div key={rel.tag} className="card" style={{ padding: 16, marginBottom: 12 }}>
+          <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+            <Icons.Tag size={14} style={{ color: "var(--accent)" }} />
+            <span style={{ fontSize: 15, fontWeight: 500 }}>{rel.name}</span>
+            <span className="chip" style={{ height: 18, fontSize: 10.5 }}>{rel.tag}</span>
+            {rel.prerelease ? <span className="chip warn" style={{ height: 18, fontSize: 10.5 }}>pre-release</span> : null}
+            <span className="mono subtle" style={{ fontSize: 11 }}>{rel.sha}</span>
+            <span className="spacer" />
+            <span className="subtle" style={{ fontSize: 11.5 }}>{rel.created}</span>
+          </div>
+          {rel.body ? <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", color: "var(--fg-1)", margin: "4px 0 10px" }}>{rel.body}</div> : null}
+          <div className="row" style={{ gap: 8 }}>
+            <a className="btn sm" href={rel.tarball} download><Icons.File size={12} /> Source (.tar.gz)</a>
+            {rel.author ? <span className="subtle" style={{ fontSize: 11.5 }}>by {rel.author.name}</span> : null}
+            <span className="spacer" />
+            {isOwner ? <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={() => remove(rel.tag)}>Delete</button> : null}
+          </div>
         </div>
       ))}
     </div>

@@ -287,6 +287,60 @@ func (s *Store) Tags(repoID int64) ([]Branch, error) {
 	return tags, nil
 }
 
+// TagExists reports whether a tag ref exists.
+func (s *Store) TagExists(repoID int64, tag string) bool {
+	_, err := s.RevParse(repoID, "refs/tags/"+tag)
+	return err == nil
+}
+
+// CreateTag creates a lightweight tag at target (a ref or sha; "" = HEAD).
+// The name is validated and the target resolved to a sha first, so neither can
+// reach git as a flag.
+func (s *Store) CreateTag(repoID int64, tag, target string) (string, error) {
+	if !ValidRefName(tag) {
+		return "", fmt.Errorf("invalid tag name")
+	}
+	if s.TagExists(repoID, tag) {
+		return "", fmt.Errorf("tag already exists: %s", tag)
+	}
+	if target == "" {
+		target = "HEAD"
+	}
+	sha, err := s.RevParse(repoID, target)
+	if err != nil {
+		return "", fmt.Errorf("target not found: %s", target)
+	}
+	if out, err := exec.Command("git", "-C", s.Path(repoID), "tag", tag, sha).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("create tag: %v: %s", err, out)
+	}
+	return sha, nil
+}
+
+// DeleteTag removes a tag.
+func (s *Store) DeleteTag(repoID int64, tag string) error {
+	if !ValidRefName(tag) {
+		return fmt.Errorf("invalid tag name")
+	}
+	if out, err := exec.Command("git", "-C", s.Path(repoID), "tag", "-d", tag).CombinedOutput(); err != nil {
+		return fmt.Errorf("delete tag: %v: %s", err, out)
+	}
+	return nil
+}
+
+// Archive streams a gzipped tar of the tree at ref (resolved to a sha first).
+// Returns the archive bytes; the caller sets download headers.
+func (s *Store) Archive(repoID int64, ref string) ([]byte, error) {
+	sha, err := s.RevParse(repoID, ref)
+	if err != nil {
+		return nil, fmt.Errorf("ref not found: %s", ref)
+	}
+	out, err := exec.Command("git", "-C", s.Path(repoID), "archive", "--format=tar.gz", sha).Output()
+	if err != nil {
+		return nil, fmt.Errorf("archive: %v", err)
+	}
+	return out, nil
+}
+
 // BranchExists reports whether a branch ref exists.
 func (s *Store) BranchExists(repoID int64, branch string) bool {
 	r, err := s.open(repoID)
