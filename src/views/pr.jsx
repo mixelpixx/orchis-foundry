@@ -117,7 +117,7 @@ function PRView({ prId, repo, setRoute }) {
           <h1 style={prStyles.title}>{pr.title}</h1>
           <div className="row" style={{ gap: 8, marginTop: 6, color: "var(--fg-2)", fontSize: 12.5, flexWrap: "wrap" }}>
             <span className="avatar" style={{ background: pr.author.color, width: 18, height: 18, fontSize: 8 }}>{pr.author.initials}</span>
-            <span><strong style={{ color: "var(--fg-1)", fontWeight: 500 }}>{pr.author.name}</strong> wants to merge</span>
+            <span><strong onClick={() => setRoute({ view: "user", handle: pr.author.handle })} style={{ color: "var(--fg-1)", fontWeight: 500, cursor: "pointer" }}>{pr.author.name}</strong> wants to merge</span>
             <span className="mono chip">{pr.commits} commits</span>
             <span>from</span>
             <span className="mono chip">{pr.branch}</span>
@@ -150,7 +150,7 @@ function PRView({ prId, repo, setRoute }) {
         <Stat icon={<Icons.Eye size={12} />} label="reviewers" value={
           <span className="row" style={{ gap: -4 }}>
             {pr.reviewers.map((r, i) => (
-              <span key={r.id} className="avatar" style={{ background: r.color, width: 18, height: 18, fontSize: 8, marginLeft: i ? -6 : 0, border: "2px solid var(--bg-1)" }}>{r.initials}</span>
+              <span key={r.id} title={"@" + r.handle} onClick={() => setRoute({ view: "user", handle: r.handle })} className="avatar" style={{ background: r.color, width: 18, height: 18, fontSize: 8, marginLeft: i ? -6 : 0, border: "2px solid var(--bg-1)", cursor: "pointer" }}>{r.initials}</span>
             ))}
             <span style={{ marginLeft: 8 }}>{pr.reviewers.length} requested</span>
             {pr.status !== "merged" ? (

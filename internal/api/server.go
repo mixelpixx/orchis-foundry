@@ -104,6 +104,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/me/activity", s.requireUser(s.handleActivity))
 		r.Get("/me/inbox", s.requireUser(s.handleInbox))
 
+		// Public user profiles
+		r.Get("/users/{handle}", s.handleUserProfile)
+
 		// Search (command palette + code search)
 		r.Get("/search/palette", s.requireUser(s.handlePaletteSearch))
 		r.Get("/search/code", s.requireUser(s.handleCodeSearch))

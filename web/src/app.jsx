@@ -100,6 +100,7 @@ function App() {
   else if (route.view === "search") view = <SearchView route={route} setRoute={navigate} />;
   else if (route.view === "newpr") view = <NewPRView route={route} setRoute={navigate} />;
   else if (route.view === "commit") view = <CommitView route={route} setRoute={navigate} />;
+  else if (route.view === "user") view = <UserProfileView route={route} setRoute={navigate} />;
   else if (route.view === "settings") view = <DevSettingsView route={route} setRoute={navigate} />;
   else if (route.view === "repo") view = <RepoView repoId={route.repo} file={route.file} setRoute={navigate} openSplit={openSplit} splitOpen={splitOpen} splitContent={splitContent} closeSplit={() => setSplitOpen(false)} />;
   else view = <DashboardView setRoute={navigate} openPalette={() => setPaletteOpen(true)} route={route} />;
@@ -258,6 +259,7 @@ function Root() {
             initials: me.initials || "?",
             color: me.color || USERS.me.color,
             avatarUrl: me.avatarUrl || "",
+            bio: me.bio || "",
             isAdmin: !!me.isAdmin,
           });
           // Replace the mock repo list with the user's real repos.

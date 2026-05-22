@@ -43,6 +43,7 @@ const SOURCES = [
   "src/views/search.jsx",
   "src/views/newpr.jsx",
   "src/views/commit.jsx",
+  "src/views/user.jsx",
   "src/app.jsx",
 ];
 

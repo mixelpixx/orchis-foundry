@@ -2353,9 +2353,19 @@ function Sidebar({
   }, /*#__PURE__*/React.createElement("button", {
     style: sbStyles.user,
     onClick: () => setRoute({
-      view: "settings"
-    })
-  }, /*#__PURE__*/React.createElement("span", {
+      view: "user",
+      handle: USERS.me.handle
+    }),
+    title: "Your profile"
+  }, USERS.me.avatarUrl ? /*#__PURE__*/React.createElement("img", {
+    src: USERS.me.avatarUrl,
+    alt: "",
+    style: {
+      width: 22,
+      height: 22,
+      borderRadius: 999
+    }
+  }) : /*#__PURE__*/React.createElement("span", {
     className: "avatar",
     style: {
       background: USERS.me.color
@@ -5976,9 +5986,14 @@ function PRView({
       fontSize: 8
     }
   }, pr.author.initials), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("strong", {
+    onClick: () => setRoute({
+      view: "user",
+      handle: pr.author.handle
+    }),
     style: {
       color: "var(--fg-1)",
-      fontWeight: 500
+      fontWeight: 500,
+      cursor: "pointer"
     }
   }, pr.author.name), " wants to merge"), /*#__PURE__*/React.createElement("span", {
     className: "mono chip"
@@ -6039,6 +6054,11 @@ function PRView({
       }
     }, pr.reviewers.map((r, i) => /*#__PURE__*/React.createElement("span", {
       key: r.id,
+      title: "@" + r.handle,
+      onClick: () => setRoute({
+        view: "user",
+        handle: r.handle
+      }),
       className: "avatar",
       style: {
         background: r.color,
@@ -6046,7 +6066,8 @@ function PRView({
         height: 18,
         fontSize: 8,
         marginLeft: i ? -6 : 0,
-        border: "2px solid var(--bg-1)"
+        border: "2px solid var(--bg-1)",
+        cursor: "pointer"
       }
     }, r.initials)), /*#__PURE__*/React.createElement("span", {
       style: {
@@ -9743,6 +9764,188 @@ const cvStyles = {
 };
 window.CommitView = CommitView;
 
+// ===== src/views/user.jsx =====
+// Public user profile — identity + their public repositories.
+function UserProfileView({
+  route,
+  setRoute
+}) {
+  const handle = route.handle;
+  const [data, setData] = React.useState(null);
+  const [err, setErr] = React.useState(false);
+  React.useEffect(() => {
+    if (!window.OrchisAPI || !handle) return;
+    setData(null);
+    setErr(false);
+    window.OrchisAPI.get(`/v1/users/${encodeURIComponent(handle)}`).then(setData).catch(() => setErr(true));
+  }, [handle]);
+  return /*#__PURE__*/React.createElement("div", {
+    style: upStyles.scroll
+  }, /*#__PURE__*/React.createElement("div", {
+    style: upStyles.page,
+    className: "fade-in"
+  }, err ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 18,
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "User not found.") : null, !data && !err ? /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12.5
+    }
+  }, "Loading\u2026") : null, data ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 16,
+      alignItems: "flex-start",
+      marginBottom: 24
+    }
+  }, data.avatarUrl ? /*#__PURE__*/React.createElement("img", {
+    src: data.avatarUrl,
+    alt: "",
+    style: {
+      width: 72,
+      height: 72,
+      borderRadius: 999,
+      border: "1px solid var(--line)"
+    }
+  }) : /*#__PURE__*/React.createElement("span", {
+    className: "avatar",
+    style: {
+      background: data.color,
+      width: 72,
+      height: 72,
+      fontSize: 26
+    }
+  }, data.initials), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("h1", {
+    style: {
+      fontSize: 22,
+      fontWeight: 500,
+      margin: 0
+    }
+  }, data.name || data.handle), /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 14,
+      marginTop: 2
+    }
+  }, "@", data.handle), data.bio ? /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 13.5,
+      lineHeight: 1.5,
+      margin: "10px 0 0",
+      maxWidth: 600
+    }
+  }, data.bio) : null, /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5,
+      marginTop: 10
+    }
+  }, "Joined ", data.memberSince))), /*#__PURE__*/React.createElement("div", {
+    className: "section-title",
+    style: {
+      marginBottom: 10
+    }
+  }, "Public repositories (", data.repos.length, ")"), data.repos.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "20px 18px",
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "No public repositories.") : /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+      gap: 12
+    }
+  }, data.repos.map(rp => /*#__PURE__*/React.createElement("button", {
+    key: rp.id,
+    className: "card",
+    onClick: () => setRoute({
+      view: "repo",
+      repo: rp.id
+    }),
+    style: {
+      padding: 14,
+      textAlign: "left",
+      cursor: "pointer",
+      border: "1px solid var(--line)",
+      background: "var(--bg-1)",
+      display: "flex",
+      flexDirection: "column",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 9,
+      height: 9,
+      borderRadius: 2,
+      background: rp.languageColor,
+      flexShrink: 0
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 13,
+      fontWeight: 500,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, rp.name), /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "row subtle",
+    style: {
+      gap: 3,
+      fontSize: 11.5
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Star, {
+    size: 11
+  }), " ", rp.stars)), /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12.5,
+      minHeight: 18,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, rp.description || "No description"), /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 11
+    }
+  }, rp.language || "—", " \xB7 updated ", rp.updated))))) : null));
+}
+const upStyles = {
+  scroll: {
+    height: "100%",
+    overflowY: "auto"
+  },
+  page: {
+    maxWidth: 920,
+    margin: "0 auto",
+    padding: "32px 24px 60px"
+  }
+};
+window.UserProfileView = UserProfileView;
+
 // ===== src/app.jsx =====
 // Main app — shell, routing, command palette, tweaks.
 
@@ -9897,6 +10100,9 @@ function App() {
     route: route,
     setRoute: navigate
   });else if (route.view === "commit") view = /*#__PURE__*/React.createElement(CommitView, {
+    route: route,
+    setRoute: navigate
+  });else if (route.view === "user") view = /*#__PURE__*/React.createElement(UserProfileView, {
     route: route,
     setRoute: navigate
   });else if (route.view === "settings") view = /*#__PURE__*/React.createElement(DevSettingsView, {
@@ -10146,6 +10352,7 @@ function Root() {
           initials: me.initials || "?",
           color: me.color || USERS.me.color,
           avatarUrl: me.avatarUrl || "",
+          bio: me.bio || "",
           isAdmin: !!me.isAdmin
         });
         // Replace the mock repo list with the user's real repos.

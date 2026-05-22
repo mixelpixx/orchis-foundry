@@ -87,8 +87,10 @@ function Sidebar({ route, setRoute, openPalette, openTokens, theme, setTheme }) 
       <div className="spacer" />
 
       <div style={sbStyles.footer}>
-        <button style={sbStyles.user} onClick={() => setRoute({ view: "settings" })}>
-          <span className="avatar" style={{ background: USERS.me.color }}>{USERS.me.initials}</span>
+        <button style={sbStyles.user} onClick={() => setRoute({ view: "user", handle: USERS.me.handle })} title="Your profile">
+          {USERS.me.avatarUrl
+            ? <img src={USERS.me.avatarUrl} alt="" style={{ width: 22, height: 22, borderRadius: 999 }} />
+            : <span className="avatar" style={{ background: USERS.me.color }}>{USERS.me.initials}</span>}
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15, textAlign: "left", flex: 1, minWidth: 0 }}>
             <span style={{ fontSize: 12.5, fontWeight: 500 }}>{USERS.me.name}</span>
             <span style={{ fontSize: 10.5, color: "var(--fg-3)" }}>@{USERS.me.handle}</span>
