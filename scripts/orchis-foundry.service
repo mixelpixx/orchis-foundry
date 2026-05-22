@@ -1,0 +1,23 @@
+[Unit]
+Description=Orchis Foundry
+After=network.target
+
+[Service]
+Type=simple
+User=foundry
+Group=foundry
+ExecStart=/usr/local/bin/orchis-foundry --config /etc/orchis-foundry/config.yaml
+Restart=on-failure
+RestartSec=2
+ProtectSystem=strict
+ReadWritePaths=/var/lib/orchis-foundry /var/log/orchis-foundry
+ProtectHome=true
+NoNewPrivileges=true
+# Private writable /tmp — the PR merge path creates a throwaway git worktree
+# under /tmp; ProtectSystem=strict makes the real /tmp read-only, so the
+# service needs its own.
+PrivateTmp=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
