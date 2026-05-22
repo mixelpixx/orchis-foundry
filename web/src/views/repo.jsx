@@ -249,11 +249,25 @@ function RepoSettingsModal({ repo, onClose, setRoute }) {
   const [err, setErr] = React.useState("");
   const [confirmDelete, setConfirmDelete] = React.useState("");
 
-  React.useEffect(() => {
-    if (window.OrchisAPI) {
-      window.OrchisAPI.get(`/v1/repos/${repo.id}/branches`).then(b => setBranches(b || [])).catch(() => {});
-    }
+  const [newBranch, setNewBranch] = React.useState("");
+  const [branchBusy, setBranchBusy] = React.useState(false);
+  const reloadBranches = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get(`/v1/repos/${repo.id}/branches`).then(b => setBranches(b || [])).catch(() => {});
   }, [repo.id]);
+  React.useEffect(() => { reloadBranches(); }, [reloadBranches]);
+
+  const createBranch = async () => {
+    if (!newBranch.trim()) return;
+    setErr(""); setBranchBusy(true);
+    try { await window.OrchisAPI.post(`/v1/repos/${repo.id}/branches`, { name: newBranch.trim(), from: defaultBranch }); setNewBranch(""); reloadBranches(); }
+    catch (e) { setErr("Could not create branch — the name may be invalid or already exist."); }
+    finally { setBranchBusy(false); }
+  };
+  const deleteBranch = async (b) => {
+    setErr("");
+    try { await window.OrchisAPI.del(`/v1/repos/${repo.id}/branches/${b}`); reloadBranches(); }
+    catch (e) { setErr("Could not delete branch — you can't delete the default branch."); }
+  };
 
   const save = async () => {
     setErr(""); setBusy(true);
@@ -321,6 +335,29 @@ function RepoSettingsModal({ repo, onClose, setRoute }) {
           <button className="btn" onClick={onClose}>Cancel</button>
           <span className="spacer" />
           <button className="btn primary" disabled={busy || !name.trim()} onClick={save}>{busy ? "Saving…" : "Save changes"}</button>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <div className="section-title" style={{ marginBottom: 8 }}>Branches</div>
+          <div className="card" style={{ overflow: "hidden", marginBottom: 10 }}>
+            {branches.length === 0 ? (
+              <div style={{ padding: "12px 14px", color: "var(--fg-3)", fontSize: 12.5 }}>No branches yet — push some code.</div>
+            ) : branches.map((b, i) => (
+              <div key={b.name} className="row" style={{ gap: 10, padding: "9px 14px", borderBottom: i < branches.length - 1 ? "1px solid var(--line)" : "none" }}>
+                <Icons.Branch size={13} style={{ color: "var(--fg-2)" }} />
+                <span className="mono" style={{ fontSize: 12.5, flex: 1 }}>{b.name}</span>
+                {b.name === (repo.defaultBranch || defaultBranch) ? <span className="chip" style={{ height: 18, fontSize: 10 }}>default</span> : (
+                  <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={() => deleteBranch(b.name)}>Delete</button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="input" value={newBranch} onChange={e => setNewBranch(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") createBranch(); }}
+              placeholder={"new-branch (from " + defaultBranch + ")"} style={{ flex: 1 }} />
+            <button className="btn" disabled={!newBranch.trim() || branchBusy} onClick={createBranch}>{branchBusy ? "Creating…" : "Create branch"}</button>
+          </div>
         </div>
 
         <div style={{ border: "1px solid var(--danger)", borderRadius: 8, padding: 14 }}>

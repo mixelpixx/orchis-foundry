@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -304,6 +305,63 @@ func (s *Store) SetDefaultBranch(repoID int64, branch string) error {
 	cmd := exec.Command("git", "-C", s.Path(repoID), "symbolic-ref", "HEAD", "refs/heads/"+branch)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("set HEAD: %v: %s", err, out)
+	}
+	return nil
+}
+
+// branchNameRe is a conservative allow-list for branch / tag names. It rejects
+// anything that could be read as a flag (leading '-') or escape git's ref
+// parsing. git itself does the final validation; this is defense-in-depth so
+// hostile names never reach the command line as options.
+var branchNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$`)
+
+// ValidRefName reports whether name is a safe branch/tag name to pass to git.
+func ValidRefName(name string) bool {
+	if !branchNameRe.MatchString(name) {
+		return false
+	}
+	if strings.Contains(name, "..") || strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".lock") {
+		return false
+	}
+	return true
+}
+
+// CreateBranch creates a new branch pointing at startPoint (a ref or sha; ""
+// means the repo's current HEAD). The name is validated; startPoint is resolved
+// to a sha first so it can't be smuggled as a flag.
+func (s *Store) CreateBranch(repoID int64, name, startPoint string) error {
+	if !ValidRefName(name) {
+		return fmt.Errorf("invalid branch name")
+	}
+	if s.BranchExists(repoID, name) {
+		return fmt.Errorf("branch already exists: %s", name)
+	}
+	if startPoint == "" {
+		startPoint = "HEAD"
+	}
+	sha, err := s.RevParse(repoID, startPoint)
+	if err != nil {
+		return fmt.Errorf("start point not found: %s", startPoint)
+	}
+	cmd := exec.Command("git", "-C", s.Path(repoID), "branch", name, sha)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("create branch: %v: %s", err, out)
+	}
+	return nil
+}
+
+// DeleteBranch force-deletes a branch. The caller must prevent deleting the
+// default branch (git also refuses to delete the branch HEAD points at).
+func (s *Store) DeleteBranch(repoID int64, name string) error {
+	if !ValidRefName(name) {
+		return fmt.Errorf("invalid branch name")
+	}
+	if !s.BranchExists(repoID, name) {
+		return fmt.Errorf("branch does not exist: %s", name)
+	}
+	cmd := exec.Command("git", "-C", s.Path(repoID), "branch", "-D", name)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("delete branch: %v: %s", err, out)
 	}
 	return nil
 }

@@ -361,6 +361,58 @@ func (s *Server) handleRepoBranches(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, branches)
 }
 
+// POST /v1/repos/{org}/{name}/branches { name, from? } — create a branch.
+func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.loadRepo(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	u := userFrom(r)
+	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
+		writeError(w, http.StatusForbidden, "only the repo owner can manage branches")
+		return
+	}
+	var in struct {
+		Name string `json:"name"`
+		From string `json:"from"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Name == "" {
+		writeError(w, http.StatusBadRequest, "branch name required")
+		return
+	}
+	if err := s.git.CreateBranch(row.ID, in.Name, in.From); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	branches, _ := s.git.Branches(row.ID, row.DefaultBranch)
+	writeJSON(w, http.StatusOK, branches)
+}
+
+// DELETE /v1/repos/{org}/{name}/branches/{branch} — delete a branch.
+func (s *Server) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.loadRepo(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	u := userFrom(r)
+	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
+		writeError(w, http.StatusForbidden, "only the repo owner can manage branches")
+		return
+	}
+	branch := chi.URLParam(r, "*")
+	if branch == row.DefaultBranch {
+		writeError(w, http.StatusConflict, "cannot delete the default branch; change the default first")
+		return
+	}
+	if err := s.git.DeleteBranch(row.ID, branch); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleRepoCommits(w http.ResponseWriter, r *http.Request) {
 	row, ok := s.loadRepo(r)
 	if !ok {

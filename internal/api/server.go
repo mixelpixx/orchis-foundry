@@ -129,6 +129,8 @@ func (s *Server) Router() http.Handler {
 		r.Get("/repos/{org}/{name}/raw", s.handleRepoRaw)
 		r.Get("/repos/{org}/{name}/readme", s.handleRepoReadme)
 		r.Get("/repos/{org}/{name}/branches", s.handleRepoBranches)
+		r.Post("/repos/{org}/{name}/branches", s.requireScope("repo:write", s.handleCreateBranch))
+		r.Delete("/repos/{org}/{name}/branches/*", s.requireScope("repo:write", s.handleDeleteBranch))
 		r.Get("/repos/{org}/{name}/commits", s.handleRepoCommits)
 		r.Get("/repos/{org}/{name}/checks", s.handleRepoChecks)
 		r.Get("/repos/{org}/{name}/activity", s.handleRepoActivity)

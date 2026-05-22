@@ -62,7 +62,11 @@
     "/repos/{org}/{name}/blob": { "get": { "summary": "File contents", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }, { "name": "path", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Blob {content,lang,size,lines}" } } } },
     "/repos/{org}/{name}/raw": { "get": { "summary": "Raw file bytes", "responses": { "200": { "description": "bytes" } } } },
     "/repos/{org}/{name}/readme": { "get": { "summary": "README", "responses": { "200": { "description": "{content,format}" } } } },
-    "/repos/{org}/{name}/branches": { "get": { "summary": "List branches", "responses": { "200": { "description": "[Branch]" } } } },
+    "/repos/{org}/{name}/branches": {
+      "get": { "summary": "List branches", "responses": { "200": { "description": "[Branch]" } } },
+      "post": { "summary": "Create a branch (owner only)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "from": { "type": "string" } }, "required": ["name"] } } } }, "responses": { "200": { "description": "[Branch]" } } }
+    },
+    "/repos/{org}/{name}/branches/{branch}": { "delete": { "summary": "Delete a branch (owner only; not the default)", "parameters": [{ "name": "branch", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "Deleted" }, "409": { "description": "is default branch" } } } },
     "/repos/{org}/{name}/commits": { "get": { "summary": "List commits", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }, { "name": "limit", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "[Commit]" } } } },
     "/repos/{org}/{name}/checks": { "get": { "summary": "Recent check runs across the repo (scan + external CI)", "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "[Check]" } } } },
     "/repos/{org}/{name}/issues": {

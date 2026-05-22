@@ -3613,11 +3613,40 @@ function RepoSettingsModal({
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState("");
   const [confirmDelete, setConfirmDelete] = React.useState("");
-  React.useEffect(() => {
-    if (window.OrchisAPI) {
-      window.OrchisAPI.get(`/v1/repos/${repo.id}/branches`).then(b => setBranches(b || [])).catch(() => {});
-    }
+  const [newBranch, setNewBranch] = React.useState("");
+  const [branchBusy, setBranchBusy] = React.useState(false);
+  const reloadBranches = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get(`/v1/repos/${repo.id}/branches`).then(b => setBranches(b || [])).catch(() => {});
   }, [repo.id]);
+  React.useEffect(() => {
+    reloadBranches();
+  }, [reloadBranches]);
+  const createBranch = async () => {
+    if (!newBranch.trim()) return;
+    setErr("");
+    setBranchBusy(true);
+    try {
+      await window.OrchisAPI.post(`/v1/repos/${repo.id}/branches`, {
+        name: newBranch.trim(),
+        from: defaultBranch
+      });
+      setNewBranch("");
+      reloadBranches();
+    } catch (e) {
+      setErr("Could not create branch — the name may be invalid or already exist.");
+    } finally {
+      setBranchBusy(false);
+    }
+  };
+  const deleteBranch = async b => {
+    setErr("");
+    try {
+      await window.OrchisAPI.del(`/v1/repos/${repo.id}/branches/${b}`);
+      reloadBranches();
+    } catch (e) {
+      setErr("Could not delete branch — you can't delete the default branch.");
+    }
+  };
   const save = async () => {
     setErr("");
     setBusy(true);
@@ -3800,6 +3829,78 @@ function RepoSettingsModal({
     disabled: busy || !name.trim(),
     onClick: save
   }, busy ? "Saving…" : "Save changes")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 24
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "section-title",
+    style: {
+      marginBottom: 8
+    }
+  }, "Branches"), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      overflow: "hidden",
+      marginBottom: 10
+    }
+  }, branches.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "12px 14px",
+      color: "var(--fg-3)",
+      fontSize: 12.5
+    }
+  }, "No branches yet \u2014 push some code.") : branches.map((b, i) => /*#__PURE__*/React.createElement("div", {
+    key: b.name,
+    className: "row",
+    style: {
+      gap: 10,
+      padding: "9px 14px",
+      borderBottom: i < branches.length - 1 ? "1px solid var(--line)" : "none"
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Branch, {
+    size: 13,
+    style: {
+      color: "var(--fg-2)"
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      fontSize: 12.5,
+      flex: 1
+    }
+  }, b.name), b.name === (repo.defaultBranch || defaultBranch) ? /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: {
+      height: 18,
+      fontSize: 10
+    }
+  }, "default") : /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    style: {
+      color: "var(--danger)"
+    },
+    onClick: () => deleteBranch(b.name)
+  }, "Delete")))), /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: newBranch,
+    onChange: e => setNewBranch(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter") createBranch();
+    },
+    placeholder: "new-branch (from " + defaultBranch + ")",
+    style: {
+      flex: 1
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn",
+    disabled: !newBranch.trim() || branchBusy,
+    onClick: createBranch
+  }, branchBusy ? "Creating…" : "Create branch"))), /*#__PURE__*/React.createElement("div", {
     style: {
       border: "1px solid var(--danger)",
       borderRadius: 8,
