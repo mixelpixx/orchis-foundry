@@ -1,38 +1,123 @@
 # Orchis Foundry
 
-A modern, self-hosted code platform. Calm, minimal UI. Apple's 3-step rule, enforced.
+A modern, **self-hosted code platform** — calm, minimal UI, Apple's 3-step rule
+enforced. Git hosting, pull requests, issues, releases, per-repo collaborators,
+a per-user BYO-model supply-chain scanner, realtime updates, and LLM-friendly
+context endpoints. **One static Go binary, one config file, one SQLite database.**
 
-This repository contains:
+Live instance: **https://foundry.orchis.ai**
 
-- **`web/`** — the frontend prototype (HTML + React via Babel-in-browser). Currently lives at the root as `index.html` + `src/` + `tweaks-panel.jsx`. Treat it as the spec.
-- **`CLAUDE.md`** — the backend implementation guide. Read this first if you're picking up the backend work.
+---
 
-## Quick tour of the frontend
+## What it does
 
-Open `index.html` in a modern browser. No build step.
+**Auth & access**
+- GitHub OIDC sign-in; DB-backed opaque sessions (HttpOnly, SameSite cookies).
+- Personal access tokens (`orc_pat_…`, Argon2id-hashed, scoped, shown once).
+- SSH keys for git over SSH.
+- **Per-repo RBAC** — collaborators with `read` / `write` / `admin` roles; the
+  owner is an implicit admin. Enforced everywhere: HTTP + SSH push, merge,
+  branches, releases, settings, webhooks, collaborator management.
 
-- **Repo view** (`src/views/repo.jsx`) — file tree + code + readme + IDE-style split panel
-- **PR review** (`src/views/pr.jsx`) — inline-comment diff, review submit bar
-- **Dashboard** (`src/views/dashboard.jsx`) — inbox, pinned repos, activity
-- **Developer settings** (`src/views/devsettings.jsx`) — PATs, SSH keys, webhooks, all top-level
-- **Command palette** (`src/palette.jsx`) — `⌘K` / `Ctrl+K`. The 3-step accelerator.
+**Repositories**
+- Create / browse (file tree, blob, raw, README), branches (create/delete/set
+  default), tags, commit history + single-commit diff, branch **compare**.
+- **Releases** — publish from a tag with notes; download source `.tar.gz`.
+- Clone/push over **HTTPS** and **SSH** (`:2222`).
 
-### Things to try
-- `⌘K` → type `token` → Enter → name + scopes + create. Three steps to a PAT.
-- Inside a repo, click `PRs` in the header to dock a PR list beside the code. `⌘\` toggles.
-- In a diff, hover a line to reveal the `+` button for an inline comment.
+**Pull requests**
+- **Open a PR from the browser** (compare base/head → title/body → reviewers).
+- Diff with **inline line comments**, **batched reviews** (stage comments +
+  verdict), request reviewers, merge (merge / squash / rebase).
+- Check runs (incl. the supply-chain scan) shown per PR.
 
-### Tweaks
-Open the in-app Tweaks panel to swap theme mode, accent (Spring / Cobalt / Ember / Violet), density, and font.
+**Issues** — open / comment / assign / close.
 
-## Backend
+**Webhooks** — per-repo, HMAC-SHA256 signed delivery with retry/backoff.
 
-Not built yet. See **`CLAUDE.md`** for the full stack decision, schema, endpoint contract, and implementation order. TL;DR:
+**Supply-chain scanner + AI assist** — each user configures one BYO model
+(Anthropic or any OpenAI-compatible endpoint). It powers the `orchis-scan` PR
+check *and* in-PR AI (summarize / explain / draft description).
 
-- **Go** + chi + Postgres + sqlc, embedded SSH server, SSE for realtime
-- **One binary**, one config file, one database
-- Implementation order in §11; stop & demo after the PAT flow (step 4) — that's the proof the design works
+**Realtime** — `/v1/stream` (SSE) drives live PR updates, check flips, and the
+notifications bell.
+
+**Search** — ⌘K command palette (repos / PRs / files / quick actions) + full
+**code search** (`git grep`) + repo/user search.
+
+**LLM-friendly** — `/llms.txt`, `/v1/openapi.json`, and `…/pack` endpoints that
+flatten a repo or PR into one markdown document for ingestion.
+
+---
+
+## Stack
+
+| Layer | Choice |
+|---|---|
+| Language | Go 1.25, single static binary (`CGO_ENABLED=0`) |
+| HTTP | `go-chi/chi` |
+| DB | SQLite (`modernc.org/sqlite`, pure-Go) + in-process SQL migrations |
+| Git | `go-git` for reads; shell out to system `git` for writes / pack / grep / archive |
+| SSH | `gliderlabs/ssh`, embedded, port 2222 |
+| Auth | Argon2id PATs, DB sessions, GitHub OAuth |
+| Realtime | Server-Sent Events (in-process pub/sub) |
+| Frontend | React 18 (precompiled), served from the binary |
+
+### Frontend build
+The UI is React authored as `src/*.jsx` and **precompiled** into a single
+bundle (no in-browser Babel, no CDN). Source of truth is `web/src/*.jsx`;
+rebuild with:
+
+```bash
+cd build && npm install && npm run build   # → web/app.bundle.js + web/vendor/
+```
+
+`web/` (index.html + app.bundle.js + vendor) is embedded into the binary via
+`go:embed`. CSP is locked to `script-src 'self'`.
+
+---
+
+## Build & run (local)
+
+```bash
+# Build the binary (frontend bundle is committed under web/)
+CGO_ENABLED=0 go build -o orchis-foundry ./cmd/orchis
+
+# Run with env overrides (or a config.yaml — see internal/config)
+ORCHIS_HTTP_ADDR=127.0.0.1:8090 \
+ORCHIS_DB_PATH=/tmp/foundry.db \
+ORCHIS_REPOS_DIR=/tmp/repos \
+ORCHIS_SESSION_KEY=$(head -c32 /dev/urandom | base64) \
+./orchis-foundry
+
+# Mint a token for local API/git testing without OIDC:
+./orchis-foundry --mint-token alice    # prints user=alice token=orc_pat_…
+```
+
+Config keys (`config.yaml`, env overrides win): `ORCHIS_HTTP_ADDR`,
+`ORCHIS_SSH_ADDR`, `ORCHIS_EXTERNAL_URL`, `ORCHIS_DB_PATH`, `ORCHIS_REPOS_DIR`,
+`ORCHIS_SSH_HOST_KEY`, `ORCHIS_SESSION_KEY`, plus OIDC + scanner settings.
+
+## Tests
+
+```bash
+go test ./...        # unit + golden (PR diff shape) + ACL + git-layer (grep/branch/commit) tests
+```
+
+## API
+
+Authenticate with `Authorization: Bearer orc_pat_<…>`. The full surface is
+self-describing:
+
+- `GET /v1/openapi.json` — OpenAPI 3.1 for every `/v1` route
+- `GET /llms.txt` — agent-oriented index
+- `GET /v1/repos/{org}/{name}/pack` — whole repo as one markdown doc
+
+## Deploy & ops
+
+See **`docs/deploy.md`** for the production runbook (systemd unit, nginx, TLS,
+daily SQLite backup timer, and the build → cross-compile → swap → verify loop).
 
 ## License
 
-MIT.
+MIT. No telemetry; zero outbound calls except OIDC and your configured model.
