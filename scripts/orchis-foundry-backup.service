@@ -1,0 +1,9 @@
+[Unit]
+Description=Orchis Foundry SQLite backup
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/orchis-foundry-backup.sh
+Nice=10
+IOSchedulingClass=idle

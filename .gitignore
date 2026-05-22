@@ -7,4 +7,7 @@
 /target/
 node_modules/
 .DS_Store
-/build/
+# Build toolchain: track the manifest, ignore installed deps.
+/build/node_modules/
+/build/package-lock.json
+.claude/launch.json

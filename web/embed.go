@@ -1,10 +1,12 @@
-// Package web embeds the Orchis Foundry frontend prototype so the binary is
-// self-contained. The files here are a copy of the top-level prototype
-// (index.html + src/ + tweaks-panel.jsx); treat the top-level copy as the
-// source of truth and re-sync on frontend changes.
+// Package web embeds the Orchis Foundry frontend so the binary is
+// self-contained. We ship the *precompiled* assets: index.html loads the
+// vendored React UMD builds and a single transpiled bundle (app.bundle.js).
+//
+// Source of truth is web/src/*.jsx; rebuild the bundle with
+// `cd build && npm run build` (scripts/build-web.mjs) after editing.
 package web
 
 import "embed"
 
-//go:embed index.html tweaks-panel.jsx src
+//go:embed index.html app.bundle.js vendor
 var FS embed.FS

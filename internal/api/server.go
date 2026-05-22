@@ -222,11 +222,13 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		// CSP allows the Babel-in-browser prototype (unpkg) + Google Fonts.
-		// Tightened once the frontend is precompiled in a later milestone.
+		// The frontend is precompiled (self-hosted React + a single bundle), so
+		// scripts are 'self' only — no remote origins, no inline/eval. Inline
+		// styles remain allowed: the app + index.html use style attributes and a
+		// <style> block, and Google Fonts is loaded via <link>.
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline' https://unpkg.com; "+
+				"script-src 'self'; "+
 				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"font-src 'self' https://fonts.gstatic.com; "+
 				"img-src 'self' data:; "+
