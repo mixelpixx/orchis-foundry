@@ -184,6 +184,84 @@ func (s *Server) handleGetRepo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, repoJSON(row))
 }
 
+// PATCH /v1/repos/{org}/{name} { name?, description?, visibility?, defaultBranch? }
+func (s *Server) handleUpdateRepo(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.loadRepo(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	u := userFrom(r)
+	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
+		writeError(w, http.StatusForbidden, "only the repo owner can change settings")
+		return
+	}
+	var in struct {
+		Name          *string `json:"name"`
+		Description   *string `json:"description"`
+		Visibility    *string `json:"visibility"`
+		DefaultBranch *string `json:"defaultBranch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if in.Name != nil {
+		if !repoNameRe.MatchString(*in.Name) {
+			writeError(w, http.StatusBadRequest, "invalid repo name")
+			return
+		}
+		if _, err := s.db.ExecContext(r.Context(), `UPDATE repos SET name = ? WHERE id = ?`, *in.Name, row.ID); err != nil {
+			writeError(w, http.StatusConflict, "a repo with that name already exists")
+			return
+		}
+		row.Name = *in.Name
+	}
+	if in.Description != nil {
+		s.db.ExecContext(r.Context(), `UPDATE repos SET description = ? WHERE id = ?`, *in.Description, row.ID)
+	}
+	if in.Visibility != nil {
+		if *in.Visibility != "public" && *in.Visibility != "private" && *in.Visibility != "internal" {
+			writeError(w, http.StatusBadRequest, "invalid visibility")
+			return
+		}
+		s.db.ExecContext(r.Context(), `UPDATE repos SET visibility = ? WHERE id = ?`, *in.Visibility, row.ID)
+	}
+	if in.DefaultBranch != nil && *in.DefaultBranch != "" {
+		if err := s.git.SetDefaultBranch(row.ID, *in.DefaultBranch); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.db.ExecContext(r.Context(), `UPDATE repos SET default_branch = ? WHERE id = ?`, *in.DefaultBranch, row.ID)
+	}
+	// Return the fresh repo (full row).
+	fresh := &repoRow{}
+	var pushedAt sql.NullString
+	err := s.db.QueryRowContext(r.Context(),
+		`SELECT rp.id, rp.owner_user_id, u.handle, rp.name, rp.description, rp.visibility,
+		        rp.default_branch, rp.language, rp.created_at, rp.pushed_at
+		 FROM repos rp JOIN users u ON u.id = rp.owner_user_id WHERE rp.id = ?`, row.ID).
+		Scan(&fresh.ID, &fresh.OwnerUserID, &fresh.OwnerHandle, &fresh.Name, &fresh.Description,
+			&fresh.Visibility, &fresh.DefaultBranch, &fresh.Language, &fresh.CreatedAt, &pushedAt)
+	if err != nil {
+		writeJSON(w, http.StatusOK, repoJSON(row))
+		return
+	}
+	fresh.PushedAt = pushedAt
+	writeJSON(w, http.StatusOK, repoJSON(fresh))
+}
+
+// GET /v1/repos/{org}/{name}/tags
+func (s *Server) handleRepoTags(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.loadRepo(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	tags, _ := s.git.Tags(row.ID)
+	writeJSON(w, http.StatusOK, tags)
+}
+
 func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 	row, ok := s.loadRepo(r)
 	if !ok {

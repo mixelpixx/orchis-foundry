@@ -35,8 +35,10 @@
     },
     "/repos/{org}/{name}": {
       "get": { "summary": "Get a repo", "responses": { "200": { "description": "Repo" } } },
+      "patch": { "summary": "Update repo settings (rename / description / visibility / default branch)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "description": { "type": "string" }, "visibility": { "type": "string", "enum": ["public", "private", "internal"] }, "defaultBranch": { "type": "string" } } } } } }, "responses": { "200": { "description": "Repo" } } },
       "delete": { "summary": "Delete a repo", "responses": { "204": { "description": "Deleted" } } }
     },
+    "/repos/{org}/{name}/tags": { "get": { "summary": "List tags", "responses": { "200": { "description": "[Tag]" } } } },
     "/repos/{org}/{name}/tree": { "get": { "summary": "File tree (nested)", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }], "responses": { "200": { "description": "[Node]" } } } },
     "/repos/{org}/{name}/blob": { "get": { "summary": "File contents", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }, { "name": "path", "in": "query", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Blob {content,lang,size,lines}" } } } },
     "/repos/{org}/{name}/raw": { "get": { "summary": "Raw file bytes", "responses": { "200": { "description": "bytes" } } } },

@@ -265,6 +265,49 @@ func (s *Store) Commits(repoID int64, ref string, limit int) ([]Commit, error) {
 	return out, nil
 }
 
+// Tags lists tags (name + target sha), newest-ish first by name desc.
+func (s *Store) Tags(repoID int64) ([]Branch, error) {
+	out, err := exec.Command("git", "-C", s.Path(repoID),
+		"for-each-ref", "--format=%(refname:short) %(objectname)", "refs/tags").Output()
+	if err != nil {
+		return []Branch{}, nil
+	}
+	var tags []Branch
+	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if ln == "" {
+			continue
+		}
+		parts := strings.Fields(ln)
+		if len(parts) >= 2 {
+			tags = append(tags, Branch{Name: parts[0], SHA: parts[1]})
+		}
+	}
+	sort.Slice(tags, func(i, j int) bool { return tags[i].Name > tags[j].Name })
+	return tags, nil
+}
+
+// BranchExists reports whether a branch ref exists.
+func (s *Store) BranchExists(repoID int64, branch string) bool {
+	r, err := s.open(repoID)
+	if err != nil {
+		return false
+	}
+	_, err = r.Reference(plumbing.NewBranchReferenceName(branch), true)
+	return err == nil
+}
+
+// SetDefaultBranch points HEAD at the given branch (must exist).
+func (s *Store) SetDefaultBranch(repoID int64, branch string) error {
+	if !s.BranchExists(repoID, branch) {
+		return fmt.Errorf("branch does not exist: %s", branch)
+	}
+	cmd := exec.Command("git", "-C", s.Path(repoID), "symbolic-ref", "HEAD", "refs/heads/"+branch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("set HEAD: %v: %s", err, out)
+	}
+	return nil
+}
+
 // DetectLanguage returns the dominant language by file extension at HEAD.
 func (s *Store) DetectLanguage(repoID int64) string {
 	nodes, _ := s.Tree(repoID, "")

@@ -20,6 +20,8 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
     return () => { cancelled = true; };
   }, [repoId]);
   const treeNodes = tree || FILE_TREE;
+  const isOwner = !!(window.USERS && USERS.me && repo.org === USERS.me.handle);
+  const [showSettings, setShowSettings] = React.useState(false);
 
   React.useEffect(() => {
     if (file) setActive(file);
@@ -66,7 +68,8 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
 
   return (
     <div style={repoStyles.shell}>
-      <RepoHeader repo={repo} setRoute={setRoute} openSplit={openSplit} />
+      <RepoHeader repo={repo} setRoute={setRoute} openSplit={openSplit} isOwner={isOwner} onSettings={() => setShowSettings(true)} />
+      {showSettings ? <RepoSettingsModal repo={repo} onClose={() => setShowSettings(false)} setRoute={setRoute} /> : null}
 
       <div style={repoStyles.body}>
         {/* File tree */}
@@ -166,7 +169,12 @@ function langColor(lang) {
   }[lang] || "var(--fg-3)";
 }
 
-function RepoHeader({ repo, setRoute, openSplit }) {
+function RepoHeader({ repo, setRoute, openSplit, isOwner, onSettings }) {
+  const [copied, setCopied] = React.useState(false);
+  const cloneURL = (typeof window !== "undefined" ? window.location.origin : "") + "/" + repo.org + "/" + repo.name + ".git";
+  const copyClone = () => {
+    navigator.clipboard?.writeText(cloneURL).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => {});
+  };
   return (
     <div style={repoStyles.header}>
       <div className="row" style={{ gap: 10, minWidth: 0, flex: 1 }}>
@@ -190,9 +198,107 @@ function RepoHeader({ repo, setRoute, openSplit }) {
           <Icons.Bolt size={12} /> Actions
         </button>
         <span style={{ width: 1, height: 18, background: "var(--line)", margin: "0 4px" }} />
-        <button className="btn sm" title="Star"><Icons.Star size={12} /> {repo.stars.toLocaleString()}</button>
-        <button className="btn sm" title="Watch"><Icons.Eye size={12} /></button>
-        <button className="btn primary sm"><Icons.Copy size={12} /> Clone</button>
+        <button className="btn sm" title="Star"><Icons.Star size={12} /> {(repo.stars || 0).toLocaleString()}</button>
+        {isOwner ? <button className="btn sm" title="Repository settings" onClick={onSettings}><Icons.Settings size={12} /></button> : null}
+        <button className="btn primary sm" onClick={copyClone} title={cloneURL}><Icons.Copy size={12} /> {copied ? "Copied!" : "Clone"}</button>
+      </div>
+    </div>
+  );
+}
+
+// Owner-only repo settings: rename, description, visibility, default branch, delete.
+function RepoSettingsModal({ repo, onClose, setRoute }) {
+  const [name, setName] = React.useState(repo.name);
+  const [description, setDescription] = React.useState(repo.description || "");
+  const [visibility, setVisibility] = React.useState(repo.visibility || "private");
+  const [defaultBranch, setDefaultBranch] = React.useState(repo.defaultBranch || "main");
+  const [branches, setBranches] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  const [confirmDelete, setConfirmDelete] = React.useState("");
+
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get(`/v1/repos/${repo.id}/branches`).then(b => setBranches(b || [])).catch(() => {});
+    }
+  }, [repo.id]);
+
+  const save = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const updated = await window.OrchisAPI.patch(`/v1/repos/${repo.id}`, {
+        name: name.trim(), description, visibility, defaultBranch,
+      });
+      await window.loadRepos().catch(() => {});
+      onClose();
+      // Repo id is org/name; if renamed, navigate to the new id.
+      if (updated && updated.id && updated.id !== repo.id) setRoute({ view: "repo", repo: updated.id });
+    } catch (e) {
+      setErr("Could not save — the name may be taken, the default branch may not exist, or the value is invalid.");
+      setBusy(false);
+    }
+  };
+
+  const del = async () => {
+    setBusy(true);
+    try {
+      await window.OrchisAPI.del(`/v1/repos/${repo.id}`);
+      await window.loadRepos().catch(() => {});
+      onClose();
+      setRoute({ view: "home" });
+    } catch (e) { setErr("Delete failed."); setBusy(false); }
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "color-mix(in oklab, var(--bg) 40%, transparent)", backdropFilter: "blur(2px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div onClick={e => e.stopPropagation()} className="card fade-in" style={{ width: 560, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto", padding: 22 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 500, margin: "0 0 4px" }}>Repository settings</h2>
+        <p className="muted" style={{ fontSize: 13, margin: "0 0 18px" }}><span className="mono">{repo.org}/{repo.name}</span></p>
+
+        {err ? <div style={{ padding: "10px 12px", border: "1px solid var(--danger)", borderRadius: 8, color: "var(--danger)", fontSize: 13, marginBottom: 14 }}>{err}</div> : null}
+
+        <div style={{ marginBottom: 14 }}>
+          <div className="section-title" style={{ marginBottom: 6 }}>Name</div>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <div className="section-title" style={{ marginBottom: 6 }}>Description</div>
+          <input className="input" value={description} onChange={e => setDescription(e.target.value)} placeholder="What's in this repo?" />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <div className="section-title" style={{ marginBottom: 6 }}>Default branch</div>
+          {branches.length > 0 ? (
+            <select className="input" value={defaultBranch} onChange={e => setDefaultBranch(e.target.value)}>
+              {branches.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
+            </select>
+          ) : <input className="input" value={defaultBranch} onChange={e => setDefaultBranch(e.target.value)} />}
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <div className="section-title" style={{ marginBottom: 6 }}>Visibility</div>
+          <div className="row" style={{ gap: 8 }}>
+            {["private", "internal", "public"].map(v => (
+              <label key={v} className="row" style={{ gap: 8, padding: "8px 12px", border: "1px solid var(--line)", borderRadius: 6, cursor: "pointer", flex: 1, background: visibility === v ? "var(--accent-soft)" : "var(--bg-1)", borderColor: visibility === v ? "var(--accent-line)" : "var(--line)" }}>
+                <input type="radio" name="vis" checked={visibility === v} onChange={() => setVisibility(v)} />
+                <span style={{ textTransform: "capitalize", fontSize: 13 }}>{v}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="row" style={{ gap: 8, marginBottom: 24 }}>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <span className="spacer" />
+          <button className="btn primary" disabled={busy || !name.trim()} onClick={save}>{busy ? "Saving…" : "Save changes"}</button>
+        </div>
+
+        <div style={{ border: "1px solid var(--danger)", borderRadius: 8, padding: 14 }}>
+          <div style={{ fontWeight: 500, color: "var(--danger)", fontSize: 13, marginBottom: 6 }}>Danger zone</div>
+          <p className="muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>Deleting a repository is permanent — code, PRs, and history are gone. Type <span className="mono">{repo.name}</span> to confirm.</p>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="input" value={confirmDelete} onChange={e => setConfirmDelete(e.target.value)} placeholder={repo.name} style={{ maxWidth: 240 }} />
+            <button className="btn" style={{ borderColor: "var(--danger)", color: "var(--danger)" }} disabled={busy || confirmDelete !== repo.name} onClick={del}>Delete this repository</button>
+          </div>
+        </div>
       </div>
     </div>
   );
