@@ -75,6 +75,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/auth/oidc/{provider}", s.handleOIDCStart)
 		r.Post("/auth/logout", s.handleLogout)
 		r.Get("/me", s.handleMe)
+		r.Patch("/me", s.requireUser(s.handlePatchMe))
 
 		// Personal access tokens
 		r.Get("/me/tokens", s.requireUser(s.handleListTokens))

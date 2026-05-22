@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -90,6 +92,44 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, meResponse(u))
 }
 
+// handlePatchMe updates the current user's editable profile (name, bio).
+func (s *Server) handlePatchMe(w http.ResponseWriter, r *http.Request) {
+	u := userFrom(r)
+	if u == nil {
+		writeError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	var in struct {
+		Name *string `json:"name"`
+		Bio  *string `json:"bio"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	name, bio := u.Name, u.Bio
+	if in.Name != nil {
+		name = strings.TrimSpace(*in.Name)
+		if name == "" || len(name) > 80 {
+			writeError(w, http.StatusBadRequest, "name must be 1–80 characters")
+			return
+		}
+	}
+	if in.Bio != nil {
+		bio = strings.TrimSpace(*in.Bio)
+		if len(bio) > 280 {
+			writeError(w, http.StatusBadRequest, "bio must be ≤ 280 characters")
+			return
+		}
+	}
+	if err := s.sessions.UpdateProfile(r.Context(), u.ID, name, bio); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update profile")
+		return
+	}
+	u.Name, u.Bio = name, bio
+	writeJSON(w, http.StatusOK, meResponse(u))
+}
+
 // meResponse shapes the user for the frontend (camelCase, plus UI helpers the
 // sidebar mock used: initials + a deterministic color).
 func meResponse(u *auth.User) map[string]any {
@@ -99,6 +139,7 @@ func meResponse(u *auth.User) map[string]any {
 		"name":      u.Name,
 		"email":     u.Email,
 		"avatarUrl": u.AvatarURL,
+		"bio":       u.Bio,
 		"isAdmin":   u.IsAdmin,
 		"initials":  initials(u.Name, u.Handle),
 		"color":     colorFor(u.Handle),

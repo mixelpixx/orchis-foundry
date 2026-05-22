@@ -14,6 +14,7 @@ function DevSettingsView({ route, setRoute }) {
   }, [route]);
 
   const tabs = [
+    { id: "account", label: "Account", icon: <Icons.Eye /> },
     { id: "tokens", label: "Tokens", icon: <Icons.Key /> },
     { id: "ssh", label: "SSH keys", icon: <Icons.Key /> },
     { id: "scanner", label: "Scanner", icon: <Icons.Bolt /> },
@@ -48,6 +49,7 @@ function DevSettingsView({ route, setRoute }) {
           </nav>
 
           <div style={dsStyles.main}>
+            {tab === "account" ? <AccountPanel /> : null}
             {tab === "tokens" ? (
               <TokensPanel newToken={newToken} setNewToken={setNewToken} generated={generatedToken} setGenerated={setGeneratedToken} />
             ) : null}
@@ -476,6 +478,77 @@ function WebhooksPanel({ newHook, setNewHook }) {
         ))}
       </div>
       )}
+    </>
+  );
+}
+
+// Account — edit your display name + bio. Avatar and email come from sign-in.
+function AccountPanel() {
+  const [me, setMe] = React.useState(null);
+  const [name, setName] = React.useState("");
+  const [bio, setBio] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+  const [err, setErr] = React.useState("");
+
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get("/v1/me").then(u => { setMe(u); setName(u.name || ""); setBio(u.bio || ""); }).catch(() => {});
+    } else if (window.USERS) {
+      setMe(USERS.me); setName(USERS.me.name || ""); setBio(USERS.me.bio || "");
+    }
+  }, []);
+
+  if (!me) return <div className="muted" style={{ padding: 20 }}>Loading…</div>;
+
+  const save = async () => {
+    setErr(""); setSaved(false); setBusy(true);
+    try {
+      const u = await window.OrchisAPI.patch("/v1/me", { name: name.trim(), bio: bio.trim() });
+      setMe(u);
+      if (window.USERS && USERS.me) { USERS.me.name = u.name; USERS.me.bio = u.bio; USERS.me.initials = u.initials; }
+      window.dispatchEvent(new CustomEvent("orchis:me-changed"));
+      setSaved(true);
+    } catch (e) { setErr("Could not save — name must be 1–80 chars and bio ≤ 280."); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <div style={dsStyles.head}>
+        <div>
+          <h2 style={dsStyles.h2}>Account</h2>
+          <p className="muted" style={dsStyles.subtitle}>Your public identity on this instance. Avatar and email come from your GitHub sign-in.</p>
+        </div>
+      </div>
+
+      {err ? <div style={{ padding: "8px 12px", border: "1px solid var(--danger)", borderRadius: 6, color: "var(--danger)", fontSize: 12.5, margin: "14px 0" }}>{err}</div> : null}
+      {saved ? <div style={{ padding: "8px 12px", border: "1px solid var(--accent-line)", background: "var(--accent-soft)", borderRadius: 6, color: "var(--accent)", fontSize: 12.5, margin: "14px 0" }}>Saved.</div> : null}
+
+      <div className="card" style={{ padding: 18, marginTop: 14, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="row" style={{ gap: 14 }}>
+          {me.avatarUrl
+            ? <img src={me.avatarUrl} alt="" style={{ width: 56, height: 56, borderRadius: 999, border: "1px solid var(--line)" }} />
+            : <span className="avatar" style={{ background: me.color, width: 56, height: 56, fontSize: 20 }}>{me.initials}</span>}
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 500 }}>{me.handle}</div>
+            <div className="subtle" style={{ fontSize: 12.5 }}>{me.email || "no email on file"}</div>
+          </div>
+        </div>
+        <Field label="Display name">
+          <input className="input" value={name} onChange={e => { setName(e.target.value); setSaved(false); }} maxLength={80} />
+        </Field>
+        <Field label="Bio" hint="A short line about you (≤ 280 chars). Shown on your profile.">
+          <textarea value={bio} onChange={e => { setBio(e.target.value); setSaved(false); }} maxLength={280} placeholder="What you work on…" style={{
+            width: "100%", height: 80, padding: 10, border: "1px solid var(--line)", borderRadius: 6,
+            fontFamily: "inherit", fontSize: 13, background: "var(--bg-1)", color: "var(--fg)", resize: "vertical",
+          }} />
+        </Field>
+        <div className="row">
+          <span className="spacer" />
+          <button className="btn primary" disabled={busy || !name.trim()} onClick={save}>{busy ? "Saving…" : "Save changes"}</button>
+        </div>
+      </div>
     </>
   );
 }

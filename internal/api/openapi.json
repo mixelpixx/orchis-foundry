@@ -13,7 +13,10 @@
   },
   "security": [{ "bearerAuth": [] }],
   "paths": {
-    "/me": { "get": { "summary": "Current user", "responses": { "200": { "description": "User" }, "401": { "description": "Not signed in" } } } },
+    "/me": {
+      "get": { "summary": "Current user", "responses": { "200": { "description": "User" }, "401": { "description": "Not signed in" } } },
+      "patch": { "summary": "Update your profile (name, bio)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "bio": { "type": "string" } } } } } }, "responses": { "200": { "description": "User" } } }
+    },
     "/me/tokens": {
       "get": { "summary": "List personal access tokens", "responses": { "200": { "description": "[Token]" } } },
       "post": { "summary": "Create a token (secret returned once)", "responses": { "200": { "description": "TokenCreated" } } }

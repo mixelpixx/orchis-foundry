@@ -31,6 +31,7 @@ type User struct {
 	Name      string `json:"name"`
 	Email     string `json:"email"`
 	AvatarURL string `json:"avatarUrl"`
+	Bio       string `json:"bio"`
 	IsAdmin   bool   `json:"isAdmin"`
 }
 
@@ -130,13 +131,20 @@ func (m *Manager) GetUser(ctx context.Context, id int64) (*User, error) {
 	u := &User{ID: id}
 	var admin int
 	err := m.db.QueryRowContext(ctx,
-		`SELECT handle, name, email, avatar_url, is_admin FROM users WHERE id = ?`, id).
-		Scan(&u.Handle, &u.Name, &u.Email, &u.AvatarURL, &admin)
+		`SELECT handle, name, email, avatar_url, bio, is_admin FROM users WHERE id = ?`, id).
+		Scan(&u.Handle, &u.Name, &u.Email, &u.AvatarURL, &u.Bio, &admin)
 	if err != nil {
 		return nil, err
 	}
 	u.IsAdmin = admin == 1
 	return u, nil
+}
+
+// UpdateProfile updates the editable profile fields (display name + bio).
+func (m *Manager) UpdateProfile(ctx context.Context, userID int64, name, bio string) error {
+	_, err := m.db.ExecContext(ctx,
+		`UPDATE users SET name = ?, bio = ? WHERE id = ?`, name, bio, userID)
+	return err
 }
 
 // CreateSession mints a session row and sets the cookie.
