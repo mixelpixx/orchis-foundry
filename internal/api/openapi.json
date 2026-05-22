@@ -25,6 +25,15 @@
       "post": { "summary": "Add an SSH key", "responses": { "200": { "description": "SSHKey" } } }
     },
     "/me/ssh-keys/{id}": { "delete": { "summary": "Remove an SSH key", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "204": { "description": "Deleted" } } } },
+    "/me/pinned": { "get": { "summary": "Repos you've pinned (sidebar order)", "responses": { "200": { "description": "[Repo]" } } } },
+    "/me/pinned/{org}/{name}": {
+      "put": { "summary": "Pin a repo to your sidebar", "responses": { "204": { "description": "Pinned" } } },
+      "delete": { "summary": "Unpin a repo", "responses": { "204": { "description": "Unpinned" } } }
+    },
+    "/me/stars/{org}/{name}": {
+      "put": { "summary": "Star a repo", "responses": { "204": { "description": "Starred" } } },
+      "delete": { "summary": "Unstar a repo", "responses": { "204": { "description": "Unstarred" } } }
+    },
     "/me/scanner": {
       "get": { "summary": "Get scanner / model config (key masked)", "responses": { "200": { "description": "ScannerSettings" } } },
       "put": { "summary": "Update scanner / model config", "responses": { "200": { "description": "ScannerSettings" } } }

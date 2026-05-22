@@ -29,6 +29,8 @@ type repoRow struct {
 	CreatedAt     string
 	PushedAt      sql.NullString
 	Pinned        bool
+	Stars         int
+	Starred       bool
 }
 
 // repoJSON shapes a repo for the frontend (matches REPOS in src/data.jsx).
@@ -44,7 +46,8 @@ func repoJSON(r *repoRow) map[string]any {
 		"description":   r.Description,
 		"language":      r.Language,
 		"languageColor": gitstore.LangColor(r.Language),
-		"stars":         0,
+		"stars":         r.Stars,
+		"starred":       r.Starred,
 		"forks":         0,
 		"watchers":      0,
 		"visibility":    r.Visibility,
@@ -90,11 +93,13 @@ func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.QueryContext(r.Context(),
 		`SELECT rp.id, rp.owner_user_id, u.handle, rp.name, rp.description, rp.visibility,
 		        rp.default_branch, rp.language, rp.created_at, rp.pushed_at,
-		        EXISTS(SELECT 1 FROM user_repo_pins p WHERE p.repo_id = rp.id AND p.user_id = ?) AS pinned
+		        EXISTS(SELECT 1 FROM user_repo_pins p WHERE p.repo_id = rp.id AND p.user_id = ?) AS pinned,
+		        (SELECT COUNT(*) FROM user_repo_stars s WHERE s.repo_id = rp.id) AS stars,
+		        EXISTS(SELECT 1 FROM user_repo_stars s WHERE s.repo_id = rp.id AND s.user_id = ?) AS starred
 		 FROM repos rp JOIN users u ON u.id = rp.owner_user_id
 		 WHERE rp.owner_user_id = ? OR rp.visibility = 'public'
 		 ORDER BY COALESCE(rp.pushed_at, rp.created_at) DESC`,
-		u.ID, u.ID)
+		u.ID, u.ID, u.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list repos")
 		return
@@ -104,13 +109,14 @@ func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		row := &repoRow{}
 		var pushedAt sql.NullString
-		var pinned int
+		var pinned, starred int
 		if err := rows.Scan(&row.ID, &row.OwnerUserID, &row.OwnerHandle, &row.Name, &row.Description,
-			&row.Visibility, &row.DefaultBranch, &row.Language, &row.CreatedAt, &pushedAt, &pinned); err != nil {
+			&row.Visibility, &row.DefaultBranch, &row.Language, &row.CreatedAt, &pushedAt, &pinned, &row.Stars, &starred); err != nil {
 			continue
 		}
 		row.PushedAt = pushedAt
 		row.Pinned = pinned == 1
+		row.Starred = starred == 1
 		out = append(out, repoJSON(row))
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -174,12 +180,17 @@ func (s *Server) handleGetRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "repo not found")
 		return
 	}
-	// pinned flag for the current user
+	// pinned / starred flags for the current user + total star count
+	_ = s.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM user_repo_stars WHERE repo_id = ?`, row.ID).Scan(&row.Stars)
 	if u := userFrom(r); u != nil {
-		var n int
+		var pinned, starred int
 		_ = s.db.QueryRowContext(r.Context(),
-			`SELECT COUNT(*) FROM user_repo_pins WHERE repo_id = ? AND user_id = ?`, row.ID, u.ID).Scan(&n)
-		row.Pinned = n > 0
+			`SELECT COUNT(*) FROM user_repo_pins WHERE repo_id = ? AND user_id = ?`, row.ID, u.ID).Scan(&pinned)
+		_ = s.db.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM user_repo_stars WHERE repo_id = ? AND user_id = ?`, row.ID, u.ID).Scan(&starred)
+		row.Pinned = pinned > 0
+		row.Starred = starred > 0
 	}
 	writeJSON(w, http.StatusOK, repoJSON(row))
 }

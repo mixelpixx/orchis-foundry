@@ -23,6 +23,31 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
   const isOwner = !!(window.USERS && USERS.me && repo.org === USERS.me.handle);
   const [showSettings, setShowSettings] = React.useState(false);
 
+  // Live star/pin state (seeded from the loaded repo, refreshed from the API).
+  const [meta, setMeta] = React.useState({ stars: repo.stars || 0, starred: !!repo.starred, pinned: !!repo.pinned });
+  React.useEffect(() => {
+    if (window.OrchisAPI && repoId) {
+      window.OrchisAPI.get(`/v1/repos/${repoId}`)
+        .then(r => setMeta({ stars: r.stars || 0, starred: !!r.starred, pinned: !!r.pinned }))
+        .catch(() => {});
+    }
+  }, [repoId]);
+  const toggleStar = async () => {
+    if (!window.OrchisAPI) return;
+    const next = !meta.starred;
+    setMeta(m => ({ ...m, starred: next, stars: Math.max(0, m.stars + (next ? 1 : -1)) }));
+    try { await (next ? window.OrchisAPI.put(`/v1/me/stars/${repoId}`) : window.OrchisAPI.del(`/v1/me/stars/${repoId}`)); } catch (e) {}
+  };
+  const togglePin = async () => {
+    if (!window.OrchisAPI) return;
+    const next = !meta.pinned;
+    setMeta(m => ({ ...m, pinned: next }));
+    try {
+      await (next ? window.OrchisAPI.put(`/v1/me/pinned/${repoId}`) : window.OrchisAPI.del(`/v1/me/pinned/${repoId}`));
+      window.dispatchEvent(new CustomEvent("orchis:repos-changed"));
+    } catch (e) {}
+  };
+
   React.useEffect(() => {
     if (file) setActive(file);
   }, [file]);
@@ -68,7 +93,7 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
 
   return (
     <div style={repoStyles.shell}>
-      <RepoHeader repo={repo} setRoute={setRoute} openSplit={openSplit} isOwner={isOwner} onSettings={() => setShowSettings(true)} />
+      <RepoHeader repo={repo} setRoute={setRoute} openSplit={openSplit} isOwner={isOwner} onSettings={() => setShowSettings(true)} meta={meta} toggleStar={toggleStar} togglePin={togglePin} />
       {showSettings ? <RepoSettingsModal repo={repo} onClose={() => setShowSettings(false)} setRoute={setRoute} /> : null}
 
       <div style={repoStyles.body}>
@@ -169,7 +194,7 @@ function langColor(lang) {
   }[lang] || "var(--fg-3)";
 }
 
-function RepoHeader({ repo, setRoute, openSplit, isOwner, onSettings }) {
+function RepoHeader({ repo, setRoute, openSplit, isOwner, onSettings, meta, toggleStar, togglePin }) {
   const [copied, setCopied] = React.useState(false);
   const cloneURL = (typeof window !== "undefined" ? window.location.origin : "") + "/" + repo.org + "/" + repo.name + ".git";
   const copyClone = () => {
@@ -198,7 +223,14 @@ function RepoHeader({ repo, setRoute, openSplit, isOwner, onSettings }) {
           <Icons.Bolt size={12} /> Actions
         </button>
         <span style={{ width: 1, height: 18, background: "var(--line)", margin: "0 4px" }} />
-        <button className="btn sm" title="Star"><Icons.Star size={12} /> {(repo.stars || 0).toLocaleString()}</button>
+        <button className="btn sm" title={meta && meta.starred ? "Unstar" : "Star"} onClick={toggleStar}
+          style={meta && meta.starred ? { color: "var(--accent)", borderColor: "var(--accent-line)", background: "var(--accent-soft)" } : {}}>
+          <Icons.Star size={12} /> {((meta ? meta.stars : repo.stars) || 0).toLocaleString()}
+        </button>
+        <button className="btn sm" title={meta && meta.pinned ? "Unpin from sidebar" : "Pin to sidebar"} onClick={togglePin}
+          style={meta && meta.pinned ? { color: "var(--accent)", borderColor: "var(--accent-line)", background: "var(--accent-soft)" } : {}}>
+          <Icons.Pin size={12} /> {meta && meta.pinned ? "Pinned" : "Pin"}
+        </button>
         {isOwner ? <button className="btn sm" title="Repository settings" onClick={onSettings}><Icons.Settings size={12} /></button> : null}
         <button className="btn primary sm" onClick={copyClone} title={cloneURL}><Icons.Copy size={12} /> {copied ? "Copied!" : "Clone"}</button>
       </div>

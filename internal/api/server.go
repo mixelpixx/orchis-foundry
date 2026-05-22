@@ -104,6 +104,13 @@ func (s *Server) Router() http.Handler {
 		// Search (command palette)
 		r.Get("/search/palette", s.requireUser(s.handlePaletteSearch))
 
+		// Pins & stars
+		r.Get("/me/pinned", s.requireUser(s.handleListPinned))
+		r.Put("/me/pinned/{org}/{name}", s.requireUser(s.handlePinRepo))
+		r.Delete("/me/pinned/{org}/{name}", s.requireUser(s.handleUnpinRepo))
+		r.Put("/me/stars/{org}/{name}", s.requireUser(s.handleStarRepo))
+		r.Delete("/me/stars/{org}/{name}", s.requireUser(s.handleUnstarRepo))
+
 		// Repositories
 		r.Get("/repos", s.requireUser(s.handleListRepos))
 		r.Post("/repos", s.requireScope("repo:admin", s.handleCreateRepo))

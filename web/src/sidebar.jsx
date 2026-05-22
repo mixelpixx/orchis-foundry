@@ -7,7 +7,16 @@ function Sidebar({ route, setRoute, openPalette, openTokens, theme, setTheme }) 
     { id: "settings", label: "Developer", icon: <Icons.Key /> },
   ];
 
-  const pinned = REPOS.filter(r => r.pinned);
+  const [pinnedState, setPinnedState] = React.useState(null);
+  React.useEffect(() => {
+    const load = () => {
+      if (window.OrchisAPI) window.OrchisAPI.get("/v1/me/pinned").then(setPinnedState).catch(() => setPinnedState([]));
+    };
+    load();
+    window.addEventListener("orchis:repos-changed", load);
+    return () => window.removeEventListener("orchis:repos-changed", load);
+  }, []);
+  const pinned = pinnedState != null ? pinnedState : (window.OrchisAPI ? [] : REPOS.filter(r => r.pinned));
 
   return (
     <aside style={sbStyles.aside}>
