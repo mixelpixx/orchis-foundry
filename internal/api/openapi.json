@@ -29,6 +29,16 @@
       "get": { "summary": "Get scanner / model config (key masked)", "responses": { "200": { "description": "ScannerSettings" } } },
       "put": { "summary": "Update scanner / model config", "responses": { "200": { "description": "ScannerSettings" } } }
     },
+    "/me/webhooks": { "get": { "summary": "List webhooks across repos you own (flat)", "responses": { "200": { "description": "[WebhookSummary]" } } } },
+    "/repos/{org}/{name}/webhooks": {
+      "get": { "summary": "List a repo's webhooks (owner only)", "responses": { "200": { "description": "[Webhook]" } } },
+      "post": { "summary": "Create a webhook", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "url": { "type": "string" }, "events": { "type": "array", "items": { "type": "string", "enum": ["push", "pull_request", "issue", "release", "deploy", "comment"] } }, "secret": { "type": "string" } }, "required": ["url", "events"] } } } }, "responses": { "200": { "description": "Webhook" } } }
+    },
+    "/repos/{org}/{name}/webhooks/{id}": {
+      "patch": { "summary": "Update a webhook (url/events/secret/active)", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "Webhook" } } },
+      "delete": { "summary": "Delete a webhook", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "204": { "description": "Deleted" } } }
+    },
+    "/repos/{org}/{name}/webhooks/{id}/test": { "post": { "summary": "Send a test ping delivery", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "204": { "description": "Queued" } } } },
     "/repos": {
       "get": { "summary": "List repos visible to you", "responses": { "200": { "description": "[Repo]" } } },
       "post": { "summary": "Create a repo (bare git repo on disk)", "responses": { "200": { "description": "Repo" } } }

@@ -355,50 +355,108 @@ function SSHPanel({ newKey, setNewKey }) {
 }
 
 function WebhooksPanel({ newHook, setNewHook }) {
+  const EVENTS = ["push", "pull_request", "issue", "release", "deploy", "comment"];
+  const ownedRepos = REPOS.filter(r => r.org === USERS.me.handle);
+
+  const [hooks, setHooks] = React.useState(null);
+  const [url, setUrl] = React.useState("");
+  const [repo, setRepo] = React.useState(ownedRepos[0] ? ownedRepos[0].id : "");
+  const [events, setEvents] = React.useState(["push"]);
+  const [secret, setSecret] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  const [tested, setTested] = React.useState("");
+
+  const reload = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get("/v1/me/webhooks").then(setHooks).catch(() => setHooks([]));
+  }, []);
+  React.useEffect(() => { reload(); }, [reload]);
+  React.useEffect(() => { if (!repo && ownedRepos[0]) setRepo(ownedRepos[0].id); }, [ownedRepos.length]);
+
+  const list = hooks != null ? hooks : (window.OrchisAPI ? [] : WEBHOOKS);
+
+  const toggleEvent = (e) => setEvents(evs => evs.includes(e) ? evs.filter(x => x !== e) : [...evs, e]);
+
+  const add = async () => {
+    setErr("");
+    if (!repo) { setErr("Create a repo first — webhooks attach to a repo."); return; }
+    if (events.length === 0) { setErr("Pick at least one event."); return; }
+    setBusy(true);
+    try {
+      await window.OrchisAPI.post("/v1/repos/" + repo + "/webhooks", { url: url.trim(), events, secret: secret.trim() });
+      setUrl(""); setSecret(""); setEvents(["push"]); setNewHook(false); reload();
+    } catch (e) {
+      setErr("Could not create webhook — check the URL is http(s) and you own the repo.");
+    } finally { setBusy(false); }
+  };
+  const test = async (w) => {
+    setTested("");
+    try { await window.OrchisAPI.post("/v1/repos/" + w.repo + "/webhooks/" + w.id + "/test"); setTested(w.id); setTimeout(() => setTested(""), 2500); } catch (e) {}
+  };
+  const remove = async (w) => {
+    try { await window.OrchisAPI.del("/v1/repos/" + w.repo + "/webhooks/" + w.id); reload(); } catch (e) {}
+  };
+
   return (
     <>
       <div style={dsStyles.head}>
         <div>
           <h2 style={dsStyles.h2}>Webhooks</h2>
-          <p className="muted" style={dsStyles.subtitle}>Get a POST when something happens. Across all your repos in one place.</p>
+          <p className="muted" style={dsStyles.subtitle}>Get a signed POST when something happens. Across all your repos in one place. Each delivery carries <span className="mono">X-Orchis-Event</span>, <span className="mono">X-Orchis-Delivery</span>, and (if a secret is set) an <span className="mono">X-Orchis-Signature</span> HMAC.</p>
         </div>
-        <button className="btn primary" onClick={() => setNewHook(true)}><Icons.Plus size={14} /> New webhook</button>
+        <button className="btn primary" onClick={() => { setErr(""); setNewHook(true); }}><Icons.Plus size={14} /> New webhook</button>
       </div>
 
       {newHook ? (
         <div className="card fade-in" style={{ padding: 18, marginTop: 14 }}>
           <h3 style={{ fontSize: 15, fontWeight: 500, margin: "0 0 12px" }}>New webhook</h3>
+          {err ? <div style={{ padding: "8px 12px", border: "1px solid var(--danger)", borderRadius: 6, color: "var(--danger)", fontSize: 12.5, marginBottom: 12 }}>{err}</div> : null}
           <Field label="Payload URL">
-            <input className="input" placeholder="https://hooks.example.com/orchis" autoFocus />
+            <input className="input" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://hooks.example.com/orchis" autoFocus />
           </Field>
           <div style={{ height: 12 }} />
           <Field label="Repo">
-            <select className="input"><option>kelp/atlas</option><option>kelp/atlas-ui</option></select>
+            {ownedRepos.length === 0 ? (
+              <div className="subtle" style={{ fontSize: 12.5 }}>You don't own any repos yet. Create one first.</div>
+            ) : (
+              <select className="input" value={repo} onChange={e => setRepo(e.target.value)}>
+                {ownedRepos.map(r => <option key={r.id} value={r.id}>{r.id}</option>)}
+              </select>
+            )}
+          </Field>
+          <div style={{ height: 12 }} />
+          <Field label="Secret" hint="Optional — used to HMAC-sign each payload">
+            <input className="input" value={secret} onChange={e => setSecret(e.target.value)} placeholder="(optional signing secret)" />
           </Field>
           <div style={{ height: 12 }} />
           <Field label="Events">
             <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-              {["push", "pull_request", "issue", "release", "deploy", "comment"].map(e => (
+              {EVENTS.map(e => (
                 <label key={e} className="chip" style={{ cursor: "pointer", padding: "0 10px", height: 24 }}>
-                  <input type="checkbox" defaultChecked={e === "push"} style={{ marginRight: 6 }} />{e}
+                  <input type="checkbox" checked={events.includes(e)} onChange={() => toggleEvent(e)} style={{ marginRight: 6 }} />{e}
                 </label>
               ))}
             </div>
           </Field>
           <div className="row" style={{ gap: 8, marginTop: 14 }}>
-            <button className="btn" onClick={() => setNewHook(false)}>Cancel</button>
+            <button className="btn" onClick={() => { setNewHook(false); setErr(""); }}>Cancel</button>
             <span className="spacer" />
-            <button className="btn primary" onClick={() => setNewHook(false)}>Add webhook</button>
+            <button className="btn primary" onClick={add} disabled={!url || !repo || busy}>{busy ? "Adding…" : "Add webhook"}</button>
           </div>
         </div>
       ) : null}
 
+      {list.length === 0 ? (
+        <div className="card" style={{ marginTop: 14, padding: "20px 18px", color: "var(--fg-3)", fontSize: 13 }}>
+          No webhooks yet. Add one to get a POST on push, PR, and more.
+        </div>
+      ) : (
       <div className="card" style={{ marginTop: 14 }}>
-        {WEBHOOKS.map((w, i) => (
+        {list.map((w, i) => (
           <div key={w.id} style={{
             display: "flex", alignItems: "center", gap: 16,
             padding: "14px 18px",
-            borderBottom: i < WEBHOOKS.length - 1 ? "1px solid var(--line)" : "none",
+            borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none",
           }}>
             <span style={{
               width: 8, height: 8, borderRadius: 999,
@@ -412,11 +470,12 @@ function WebhooksPanel({ newHook, setNewHook }) {
               </div>
               <div className="subtle" style={{ fontSize: 11.5, marginTop: 4 }}>Last delivery {w.lastDelivery}</div>
             </div>
-            <button className="btn sm">Test</button>
-            <button className="btn ghost sm" style={{ color: "var(--danger)" }}>Delete</button>
+            <button className="btn sm" onClick={() => test(w)}>{tested === w.id ? "Sent ✓" : "Test"}</button>
+            <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={() => remove(w)}>Delete</button>
           </div>
         ))}
       </div>
+      )}
     </>
   );
 }

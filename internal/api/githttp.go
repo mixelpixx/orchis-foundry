@@ -166,14 +166,15 @@ func (s *Server) installPushHook(repoID int64) {
 	hookPath := filepath.Join(dir, "hooks", "post-receive")
 	script := fmt.Sprintf(`#!/bin/sh
 # Orchis Foundry post-receive hook — notifies the app of pushes.
-payload=""
+refs=""
 while read old new ref; do
-  payload="$payload$old $new $ref\n"
+  [ -n "$refs" ] && refs="$refs,"
+  refs="$refs{\"ref\":\"$ref\",\"old\":\"$old\",\"new\":\"$new\"}"
 done
 curl -s -m 5 -X POST \
   -H "X-Hook-Secret: %s" \
   -H "Content-Type: application/json" \
-  -d "{\"repo_id\": %d}" \
+  -d "{\"repo_id\": %d, \"refs\": [$refs]}" \
   http://%s/internal/hooks/push >/dev/null 2>&1 || true
 `, s.cfg.SessionKey, repoID, s.cfg.HTTPAddr)
 	_ = os.MkdirAll(filepath.Join(dir, "hooks"), 0o755)

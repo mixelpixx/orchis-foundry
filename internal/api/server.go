@@ -17,6 +17,7 @@ import (
 	gitstore "github.com/orchis-ai/foundry/internal/git"
 	"github.com/orchis-ai/foundry/internal/oidc"
 	"github.com/orchis-ai/foundry/internal/scan"
+	"github.com/orchis-ai/foundry/internal/webhook"
 )
 
 // Server holds shared dependencies for the HTTP handlers.
@@ -29,11 +30,12 @@ type Server struct {
 	github   *oidc.GitHub
 	git      *gitstore.Store
 	scan     *scan.Worker
+	webhooks *webhook.Worker
 }
 
 // New constructs a Server. webFS is the embedded (or on-disk) frontend tree.
-func New(cfg *config.Config, log *slog.Logger, webFS fs.FS, db *sql.DB, sessions *auth.Manager, github *oidc.GitHub, git *gitstore.Store, scanWorker *scan.Worker) *Server {
-	return &Server{cfg: cfg, log: log, web: webFS, db: db, sessions: sessions, github: github, git: git, scan: scanWorker}
+func New(cfg *config.Config, log *slog.Logger, webFS fs.FS, db *sql.DB, sessions *auth.Manager, github *oidc.GitHub, git *gitstore.Store, scanWorker *scan.Worker, webhookWorker *webhook.Worker) *Server {
+	return &Server{cfg: cfg, log: log, web: webFS, db: db, sessions: sessions, github: github, git: git, scan: scanWorker, webhooks: webhookWorker}
 }
 
 // Router builds the chi router with all routes mounted.
@@ -86,6 +88,14 @@ func (s *Server) Router() http.Handler {
 		// Per-user scanner settings
 		r.Get("/me/scanner", s.requireUser(s.handleGetScanner))
 		r.Put("/me/scanner", s.requireUser(s.handlePutScanner))
+
+		// Webhooks (flat index + per-repo CRUD)
+		r.Get("/me/webhooks", s.requireUser(s.handleListMyWebhooks))
+		r.Get("/repos/{org}/{name}/webhooks", s.requireScope("repo:admin", s.handleListRepoWebhooks))
+		r.Post("/repos/{org}/{name}/webhooks", s.requireScope("repo:admin", s.handleCreateWebhook))
+		r.Patch("/repos/{org}/{name}/webhooks/{id}", s.requireScope("repo:admin", s.handleUpdateWebhook))
+		r.Delete("/repos/{org}/{name}/webhooks/{id}", s.requireScope("repo:admin", s.handleDeleteWebhook))
+		r.Post("/repos/{org}/{name}/webhooks/{id}/test", s.requireScope("repo:admin", s.handleTestWebhook))
 
 		// Dashboard
 		r.Get("/me/activity", s.requireUser(s.handleActivity))

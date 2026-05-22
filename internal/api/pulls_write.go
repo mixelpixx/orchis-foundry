@@ -185,6 +185,12 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 	s.db.ExecContext(r.Context(), `UPDATE pulls SET state='merged', updated_at=datetime('now') WHERE id = ?`, pullID)
 	s.db.ExecContext(r.Context(), `UPDATE repos SET pushed_at=datetime('now') WHERE id = ?`, row.ID)
 	s.logActivity(r.Context(), u.ID, "pr_merged", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(num), prTitle)
+	if s.webhooks != nil {
+		s.webhooks.Fire(r.Context(), row.ID, "pull_request", map[string]any{
+			"event": "pull_request", "action": "merged", "repo": row.OwnerHandle + "/" + row.Name,
+			"number": num, "title": prTitle, "strategy": in.Strategy, "merged_by": u.Handle,
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"merged": true, "strategy": in.Strategy})
 }
 

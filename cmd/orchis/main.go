@@ -23,6 +23,7 @@ import (
 	"github.com/orchis-ai/foundry/internal/logging"
 	"github.com/orchis-ai/foundry/internal/oidc"
 	"github.com/orchis-ai/foundry/internal/scan"
+	"github.com/orchis-ai/foundry/internal/webhook"
 	"github.com/orchis-ai/foundry/internal/sshd"
 	"github.com/orchis-ai/foundry/web"
 )
@@ -106,7 +107,10 @@ func main() {
 	// LLM supply-chain scan worker (started after the signal context exists).
 	scanWorker := scan.NewWorker(database, gitStore, log)
 
-	srv := api.New(cfg, log, webFS, database, sessions, github, gitStore, scanWorker)
+	// Outbound webhook delivery worker.
+	webhookWorker := webhook.NewWorker(database, log)
+
+	srv := api.New(cfg, log, webFS, database, sessions, github, gitStore, scanWorker, webhookWorker)
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           srv.Router(),
@@ -117,6 +121,7 @@ func main() {
 	defer stop()
 
 	go scanWorker.Run(ctx)
+	go webhookWorker.Run(ctx)
 
 	go func() {
 		log.Info("http listening", "addr", cfg.HTTPAddr, "external_url", cfg.ExternalURL)

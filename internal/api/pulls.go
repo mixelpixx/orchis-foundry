@@ -225,6 +225,12 @@ func (s *Server) handleCreatePull(w http.ResponseWriter, r *http.Request) {
 		s.scan.Enqueue(id, row.ID, headSHA)
 	}
 	s.logActivity(r.Context(), u.ID, "pr_opened", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(number), in.Title)
+	if s.webhooks != nil {
+		s.webhooks.Fire(r.Context(), row.ID, "pull_request", map[string]any{
+			"event": "pull_request", "action": "opened", "repo": row.OwnerHandle + "/" + row.Name,
+			"number": number, "title": in.Title, "head": in.Head, "base": in.Base, "author": u.Handle,
+		})
+	}
 	writeJSON(w, http.StatusOK, s.pullSummary(r, id))
 }
 

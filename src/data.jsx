@@ -396,11 +396,21 @@ const OrchisAPI = {
       body: JSON.stringify(body || {}),
     });
     if (!r.ok) throw new Error(path + " -> " + r.status);
+    if (r.status === 204 || r.headers.get("content-length") === "0") return true;
     return r.json();
   },
   async patch(path, body) {
     const r = await fetch(path, {
       method: "PATCH", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) throw new Error(path + " -> " + r.status);
+    return r.json();
+  },
+  async put(path, body) {
+    const r = await fetch(path, {
+      method: "PUT", credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
     });

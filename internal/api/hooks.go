@@ -15,6 +15,11 @@ func (s *Server) handlePushHook(w http.ResponseWriter, r *http.Request) {
 	}
 	var in struct {
 		RepoID int64 `json:"repo_id"`
+		Refs   []struct {
+			Ref string `json:"ref"`
+			Old string `json:"old"`
+			New string `json:"new"`
+		} `json:"refs"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.RepoID == 0 {
 		http.Error(w, "bad payload", http.StatusBadRequest)
@@ -61,6 +66,21 @@ func (s *Server) handlePushHook(w http.ResponseWriter, r *http.Request) {
 		if s.scan != nil {
 			s.scan.Enqueue(p.id, in.RepoID, newHead)
 		}
+	}
+
+	// Fan out a `push` webhook event to subscribers of this repo.
+	if s.webhooks != nil {
+		var owner, name string
+		s.db.QueryRowContext(r.Context(),
+			`SELECT u.handle, rp.name FROM repos rp JOIN users u ON u.id = rp.owner_user_id WHERE rp.id = ?`,
+			in.RepoID).Scan(&owner, &name)
+		refs := make([]map[string]string, 0, len(in.Refs))
+		for _, rf := range in.Refs {
+			refs = append(refs, map[string]string{"ref": rf.Ref, "old": rf.Old, "new": rf.New})
+		}
+		s.webhooks.Fire(r.Context(), in.RepoID, "push", map[string]any{
+			"event": "push", "repo": owner + "/" + name, "repoId": in.RepoID, "refs": refs,
+		})
 	}
 
 	s.log.Info("push received", "repo_id", in.RepoID, "language", lang, "prs_refreshed", len(prs))
