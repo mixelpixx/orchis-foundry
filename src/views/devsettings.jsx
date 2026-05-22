@@ -492,6 +492,8 @@ function AccountPanel() {
   const [busy, setBusy] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
   const [err, setErr] = React.useState("");
+  const fileRef = React.useRef(null);
+  const [avatarBusy, setAvatarBusy] = React.useState(false);
 
   React.useEffect(() => {
     if (window.OrchisAPI) {
@@ -502,9 +504,6 @@ function AccountPanel() {
   }, []);
 
   if (!me) return <div className="muted" style={{ padding: 20 }}>Loading…</div>;
-
-  const fileRef = React.useRef(null);
-  const [avatarBusy, setAvatarBusy] = React.useState(false);
 
   const applyMe = (u) => {
     setMe(u);
