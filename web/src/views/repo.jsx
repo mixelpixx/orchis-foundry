@@ -354,7 +354,7 @@ function RepoMainPanel({ repo, repoId, active, tab, setTab, setActive }) {
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {tab === "code" ? <CodeView repoId={repoId} path={active} /> : null}
         {tab === "readme" ? <ReadmeView repoId={repoId} /> : null}
-        {tab === "activity" ? <RecentActivityView /> : null}
+        {tab === "activity" ? <RecentActivityView repoId={repoId} /> : null}
       </div>
     </>
   );
@@ -542,20 +542,32 @@ function inlineMd(s) {
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<a href=\"#\" style=\"color: var(--accent); text-decoration: none;\">$1</a>");
 }
 
-function RecentActivityView() {
+function RecentActivityView({ repoId }) {
+  const [activity, setActivity] = React.useState(null);
+  React.useEffect(() => {
+    if (window.OrchisAPI && repoId) {
+      window.OrchisAPI.get(`/v1/repos/${repoId}/activity`).then(setActivity).catch(() => setActivity([]));
+    }
+  }, [repoId]);
+  const items = activity != null ? activity : (window.OrchisAPI ? [] : ACTIVITY.slice(0, 4));
   return (
     <div style={{ padding: "20px 24px" }}>
+      {items.length === 0 ? (
+        <div className="card" style={{ padding: "20px 18px", color: "var(--fg-3)", fontSize: 13 }}>No activity yet.</div>
+      ) : (
       <div className="card" style={{ padding: 4 }}>
-        {ACTIVITY.slice(0, 4).map(a => (
+        {items.map(a => (
           <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
             <span className="avatar" style={{ background: a.actor.color, width: 20, height: 20, fontSize: 9 }}>{a.actor.initials}</span>
             <div style={{ flex: 1 }}>
-              <strong style={{ fontWeight: 500 }}>{a.actor.name}</strong> <span className="muted">— {a.title}</span>
+              <strong style={{ fontWeight: 500 }}>{a.actor.name}</strong> <span className="muted">{activityVerb(a.kind)} {a.target}</span>
+              <div className="subtle" style={{ fontSize: 11.5 }}>{a.title}</div>
             </div>
             <span className="subtle" style={{ fontSize: 11 }}>{a.when}</span>
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }

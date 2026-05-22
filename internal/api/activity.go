@@ -61,6 +61,56 @@ func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// GET /v1/repos/{org}/{name}/activity?limit= — recent events for a single repo.
+// ACL piggybacks on loadRepo (public, or owner for private/internal).
+func (s *Server) handleRepoActivity(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.loadRepo(r)
+	if !ok {
+		writeError(w, http.StatusNotFound, "repo not found")
+		return
+	}
+	limit := 30
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 100 {
+		limit = v
+	}
+	rows, err := s.db.QueryContext(r.Context(),
+		`SELECT a.id, a.actor_id, a.kind, a.target, a.title, a.created_at
+		 FROM activity a
+		 WHERE a.repo_id = ?
+		 ORDER BY a.id DESC LIMIT ?`, row.ID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load activity")
+		return
+	}
+	// Collect rows first, then resolve actor briefs — calling userBrief (a nested
+	// query) inside the open rows loop would deadlock the single SQLite conn.
+	type rawAct struct {
+		id      int64
+		actorID sql.NullInt64
+		kind, target, title, created string
+	}
+	var raws []rawAct
+	for rows.Next() {
+		var a rawAct
+		if rows.Scan(&a.id, &a.actorID, &a.kind, &a.target, &a.title, &a.created) == nil {
+			raws = append(raws, a)
+		}
+	}
+	rows.Close()
+
+	out := []map[string]any{}
+	for _, a := range raws {
+		actor := map[string]any{"name": "system", "initials": "·", "color": "var(--fg-3)", "handle": ""}
+		if a.actorID.Valid {
+			actor = s.userBrief(a.actorID.Int64)
+		}
+		out = append(out, map[string]any{
+			"id": a.id, "actor": actor, "kind": a.kind, "target": a.target, "title": a.title, "when": relativeTime(a.created),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // GET /v1/me/inbox — derived "needs your attention" items (no separate table).
 func (s *Server) handleInbox(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)

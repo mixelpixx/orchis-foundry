@@ -125,6 +125,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/repos/{org}/{name}/branches", s.handleRepoBranches)
 		r.Get("/repos/{org}/{name}/commits", s.handleRepoCommits)
 		r.Get("/repos/{org}/{name}/checks", s.handleRepoChecks)
+		r.Get("/repos/{org}/{name}/activity", s.handleRepoActivity)
 		r.Get("/repos/{org}/{name}/pack", s.handleRepoPack)
 
 		// Issues

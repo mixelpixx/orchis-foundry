@@ -3886,7 +3886,9 @@ function RepoMainPanel({
     path: active
   }) : null, tab === "readme" ? /*#__PURE__*/React.createElement(ReadmeView, {
     repoId: repoId
-  }) : null, tab === "activity" ? /*#__PURE__*/React.createElement(RecentActivityView, null) : null));
+  }) : null, tab === "activity" ? /*#__PURE__*/React.createElement(RecentActivityView, {
+    repoId: repoId
+  }) : null));
 }
 function Subtab({
   active,
@@ -4156,17 +4158,33 @@ function parseMd(md) {
 function inlineMd(s) {
   return s.replace(/`([^`]+)`/g, "<code style=\"font-family: var(--font-mono); background: var(--bg-2); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;\">$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<a href=\"#\" style=\"color: var(--accent); text-decoration: none;\">$1</a>");
 }
-function RecentActivityView() {
+function RecentActivityView({
+  repoId
+}) {
+  const [activity, setActivity] = React.useState(null);
+  React.useEffect(() => {
+    if (window.OrchisAPI && repoId) {
+      window.OrchisAPI.get(`/v1/repos/${repoId}/activity`).then(setActivity).catch(() => setActivity([]));
+    }
+  }, [repoId]);
+  const items = activity != null ? activity : window.OrchisAPI ? [] : ACTIVITY.slice(0, 4);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "20px 24px"
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, items.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "20px 18px",
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "No activity yet.") : /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       padding: 4
     }
-  }, ACTIVITY.slice(0, 4).map(a => /*#__PURE__*/React.createElement("div", {
+  }, items.map(a => /*#__PURE__*/React.createElement("div", {
     key: a.id,
     style: {
       display: "flex",
@@ -4194,7 +4212,12 @@ function RecentActivityView() {
     }
   }, a.actor.name), " ", /*#__PURE__*/React.createElement("span", {
     className: "muted"
-  }, "\u2014 ", a.title)), /*#__PURE__*/React.createElement("span", {
+  }, activityVerb(a.kind), " ", a.target), /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5
+    }
+  }, a.title)), /*#__PURE__*/React.createElement("span", {
     className: "subtle",
     style: {
       fontSize: 11
