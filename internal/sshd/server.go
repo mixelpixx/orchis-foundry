@@ -99,16 +99,29 @@ func (s *Server) handleSession(sess glssh.Session) {
 		return
 	}
 
+	// Determine the user's role: owner, or a collaborator role (read/write/admin).
+	role := ""
+	if ownerID == u.ID {
+		role = "owner"
+	} else {
+		var cr string
+		if s.db.QueryRowContext(sess.Context(),
+			`SELECT role FROM repo_collaborators WHERE repo_id = ? AND user_id = ?`, repoID, u.ID).Scan(&cr) == nil {
+			role = cr
+		}
+	}
+
 	write := service == "git-receive-pack"
 	if write {
-		if ownerID != u.ID {
+		// Push requires owner or an admin/write collaborator.
+		if role != "owner" && role != "admin" && role != "write" {
 			io.WriteString(sess.Stderr(), "orchis: you do not have push access to this repository\n")
 			sess.Exit(1)
 			return
 		}
 	} else {
-		// read: public repos OK for any authed user; otherwise owner only.
-		if vis != "public" && ownerID != u.ID {
+		// read: public repos OK for any authed user; otherwise owner/collaborator.
+		if vis != "public" && role == "" {
 			io.WriteString(sess.Stderr(), "orchis: you do not have read access to this repository\n")
 			sess.Exit(1)
 			return

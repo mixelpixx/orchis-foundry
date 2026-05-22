@@ -146,10 +146,8 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := userFrom(r)
-	// Merge requires push (write) access; loadRepo already enforced read, and
-	// the route requires repo:write scope. Also require ownership for v1.
-	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
-		writeError(w, http.StatusForbidden, "only the repo owner can merge in v1")
+	// Merge requires write access (owner or write/admin collaborator).
+	if !s.requireWrite(w, row) {
 		return
 	}
 	num, _ := strconv.Atoi(chi.URLParam(r, "num"))
@@ -206,12 +204,12 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 }
 
 // canManageReviewers reports whether u may add/remove reviewers on a pull:
-// the repo owner or the PR author.
+// a write-access collaborator (owner/admin/write) or the PR author.
 func (s *Server) canManageReviewers(r *http.Request, row *repoRow, pullID int64, u *auth.User) bool {
 	if u == nil {
 		return false
 	}
-	if row.OwnerUserID.Valid && row.OwnerUserID.Int64 == u.ID {
+	if canWrite(row) {
 		return true
 	}
 	var authorID int64

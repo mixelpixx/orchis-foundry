@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -107,7 +108,11 @@ func (s *Server) canSubscribe(u *auth.User, topic string) bool {
 		if row.Visibility == "public" {
 			return true
 		}
-		return row.OwnerUserID.Valid && row.OwnerUserID.Int64 == u.ID
+		if row.OwnerUserID.Valid && row.OwnerUserID.Int64 == u.ID {
+			return true
+		}
+		_, isCollab := s.collaboratorRole(context.Background(), row.ID, u.ID)
+		return isCollab
 	}
 	return false
 }

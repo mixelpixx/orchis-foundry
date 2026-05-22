@@ -145,11 +145,11 @@ func (s *Server) handleUpdatePull(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "pull request not found")
 		return
 	}
-	// Author or repo owner may edit.
+	// The PR author or a write-access collaborator may edit.
 	var authorID int64
 	s.db.QueryRowContext(r.Context(), `SELECT author_id FROM pulls WHERE id = ?`, pullID).Scan(&authorID)
-	if authorID != u.ID && !(row.OwnerUserID.Valid && row.OwnerUserID.Int64 == u.ID) {
-		writeError(w, http.StatusForbidden, "only the PR author or repo owner can edit")
+	if authorID != u.ID && !canWrite(row) {
+		writeError(w, http.StatusForbidden, "only the PR author or a write collaborator can edit")
 		return
 	}
 	var in struct {

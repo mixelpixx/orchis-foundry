@@ -77,8 +77,7 @@ func (s *Server) handleCreateRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := userFrom(r)
-	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
-		writeError(w, http.StatusForbidden, "only the repo owner can publish releases")
+	if !s.requireWrite(w, row) {
 		return
 	}
 	var in struct {
@@ -133,9 +132,7 @@ func (s *Server) handleDeleteRelease(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "repo not found")
 		return
 	}
-	u := userFrom(r)
-	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
-		writeError(w, http.StatusForbidden, "only the repo owner can delete releases")
+	if !s.requireWrite(w, row) {
 		return
 	}
 	tag := chi.URLParam(r, "tag")

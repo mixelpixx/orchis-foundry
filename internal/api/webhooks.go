@@ -239,9 +239,10 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ownsRepo gates webhook management: owner or an admin collaborator. (Name kept
+// for call-site stability; semantics are now "can administer".)
 func (s *Server) ownsRepo(r *http.Request, row *repoRow) bool {
-	u := userFrom(r)
-	return u != nil && row.OwnerUserID.Valid && row.OwnerUserID.Int64 == u.ID
+	return canAdmin(row)
 }
 
 func (s *Server) webhookBelongsToRepo(r *http.Request, id, repoID int64) bool {

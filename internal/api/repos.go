@@ -31,6 +31,7 @@ type repoRow struct {
 	Pinned        bool
 	Stars         int
 	Starred       bool
+	Role          string // current user's role: owner|admin|write|read|"" (set by loadRepo / list)
 }
 
 // repoJSON shapes a repo for the frontend (matches REPOS in src/data.jsx).
@@ -54,6 +55,7 @@ func repoJSON(r *repoRow) map[string]any {
 		"defaultBranch": r.DefaultBranch,
 		"updated":       relativeTime(updated),
 		"pinned":        r.Pinned,
+		"role":          r.Role, // owner|admin|write|read|"" — drives UI gating
 	}
 }
 
@@ -76,13 +78,17 @@ func (s *Server) loadRepo(r *http.Request) (*repoRow, bool) {
 	}
 	row.PushedAt = pushedAt
 
-	// ACL: public repos readable by anyone (incl. unauthenticated); others
-	// require the owner. (Org membership ACL is a later milestone.)
+	// Compute the caller's role once (owner | collaborator role | "").
+	if u := userFrom(r); u != nil {
+		row.Role = s.roleFor(r.Context(), row, u.ID)
+	}
+
+	// Read ACL: public repos are readable by anyone (incl. unauthenticated);
+	// private/internal require owner or any collaborator role.
 	if row.Visibility == "public" {
 		return row, true
 	}
-	u := userFrom(r)
-	if u != nil && row.OwnerUserID.Valid && row.OwnerUserID.Int64 == u.ID {
+	if row.Role != "" {
 		return row, true
 	}
 	return nil, false
@@ -95,11 +101,14 @@ func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 		        rp.default_branch, rp.language, rp.created_at, rp.pushed_at,
 		        EXISTS(SELECT 1 FROM user_repo_pins p WHERE p.repo_id = rp.id AND p.user_id = ?) AS pinned,
 		        (SELECT COUNT(*) FROM user_repo_stars s WHERE s.repo_id = rp.id) AS stars,
-		        EXISTS(SELECT 1 FROM user_repo_stars s WHERE s.repo_id = rp.id AND s.user_id = ?) AS starred
+		        EXISTS(SELECT 1 FROM user_repo_stars s WHERE s.repo_id = rp.id AND s.user_id = ?) AS starred,
+		        CASE WHEN rp.owner_user_id = ? THEN 'owner'
+		             ELSE COALESCE((SELECT c.role FROM repo_collaborators c WHERE c.repo_id = rp.id AND c.user_id = ?), '') END AS role
 		 FROM repos rp JOIN users u ON u.id = rp.owner_user_id
 		 WHERE rp.owner_user_id = ? OR rp.visibility = 'public'
+		    OR EXISTS(SELECT 1 FROM repo_collaborators c WHERE c.repo_id = rp.id AND c.user_id = ?)
 		 ORDER BY COALESCE(rp.pushed_at, rp.created_at) DESC`,
-		u.ID, u.ID, u.ID)
+		u.ID, u.ID, u.ID, u.ID, u.ID, u.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not list repos")
 		return
@@ -111,7 +120,7 @@ func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 		var pushedAt sql.NullString
 		var pinned, starred int
 		if err := rows.Scan(&row.ID, &row.OwnerUserID, &row.OwnerHandle, &row.Name, &row.Description,
-			&row.Visibility, &row.DefaultBranch, &row.Language, &row.CreatedAt, &pushedAt, &pinned, &row.Stars, &starred); err != nil {
+			&row.Visibility, &row.DefaultBranch, &row.Language, &row.CreatedAt, &pushedAt, &pinned, &row.Stars, &starred, &row.Role); err != nil {
 			continue
 		}
 		row.PushedAt = pushedAt
@@ -202,9 +211,7 @@ func (s *Server) handleUpdateRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "repo not found")
 		return
 	}
-	u := userFrom(r)
-	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
-		writeError(w, http.StatusForbidden, "only the repo owner can change settings")
+	if !s.requireAdmin(w, row) {
 		return
 	}
 	var in struct {
@@ -279,9 +286,9 @@ func (s *Server) handleDeleteRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "repo not found")
 		return
 	}
-	u := userFrom(r)
-	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
-		writeError(w, http.StatusForbidden, "not your repo")
+	// Deleting a repo is owner-only (stricter than admin collaborators).
+	if row.Role != roleOwner {
+		writeError(w, http.StatusForbidden, "only the repo owner can delete it")
 		return
 	}
 	_, _ = s.db.ExecContext(r.Context(), `DELETE FROM repos WHERE id = ?`, row.ID)
@@ -368,9 +375,7 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "repo not found")
 		return
 	}
-	u := userFrom(r)
-	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
-		writeError(w, http.StatusForbidden, "only the repo owner can manage branches")
+	if !s.requireWrite(w, row) {
 		return
 	}
 	var in struct {
@@ -396,9 +401,7 @@ func (s *Server) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "repo not found")
 		return
 	}
-	u := userFrom(r)
-	if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != u.ID {
-		writeError(w, http.StatusForbidden, "only the repo owner can manage branches")
+	if !s.requireWrite(w, row) {
 		return
 	}
 	branch := chi.URLParam(r, "*")

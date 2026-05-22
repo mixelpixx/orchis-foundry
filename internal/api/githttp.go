@@ -52,23 +52,29 @@ func (s *Server) authorizeGit(w http.ResponseWriter, r *http.Request, write bool
 		}
 	}
 
+	role := ""
+	if userID >= 0 {
+		role = s.roleFor(r.Context(), row, userID)
+	}
+
 	if write {
 		if userID < 0 {
 			s.gitAuthChallenge(w)
 			return nil, false
 		}
-		if !row.OwnerUserID.Valid || row.OwnerUserID.Int64 != userID {
+		// Push requires write access: owner, or an admin/write collaborator.
+		if role != roleOwner && role != roleAdmin && role != roleWrite {
 			http.Error(w, "you do not have push access to this repository", http.StatusForbidden)
 			return nil, false
 		}
 		return row, true
 	}
 
-	// read
+	// read: public, or any member (owner / collaborator of any role).
 	if row.Visibility == "public" {
 		return row, true
 	}
-	if userID >= 0 && row.OwnerUserID.Valid && row.OwnerUserID.Int64 == userID {
+	if role != "" {
 		return row, true
 	}
 	s.gitAuthChallenge(w)

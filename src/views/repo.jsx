@@ -20,7 +20,10 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
     return () => { cancelled = true; };
   }, [repoId]);
   const treeNodes = tree || FILE_TREE;
-  const isOwner = !!(window.USERS && USERS.me && repo.org === USERS.me.handle);
+  // Manage (settings + collaborators) is available to the owner or an admin
+  // collaborator. repo.role comes from the API (owner|admin|write|read|"").
+  const isOwner = (repo.role === "owner" || repo.role === "admin")
+    || !!(window.USERS && USERS.me && repo.org === USERS.me.handle);
   const [showSettings, setShowSettings] = React.useState(false);
 
   // Live star/pin state (seeded from the loaded repo, refreshed from the API).
@@ -272,6 +275,24 @@ function RepoSettingsModal({ repo, onClose, setRoute }) {
     catch (e) { setErr("Could not delete branch — you can't delete the default branch."); }
   };
 
+  // Collaborators
+  const [collabs, setCollabs] = React.useState([]);
+  const [collabHandle, setCollabHandle] = React.useState("");
+  const [collabRole, setCollabRole] = React.useState("write");
+  const reloadCollabs = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get(`/v1/repos/${repo.id}/collaborators`).then(c => setCollabs(c || [])).catch(() => {});
+  }, [repo.id]);
+  React.useEffect(() => { reloadCollabs(); }, [reloadCollabs]);
+  const addCollab = async () => {
+    if (!collabHandle.trim()) return;
+    setErr("");
+    try { await window.OrchisAPI.put(`/v1/repos/${repo.id}/collaborators/${collabHandle.trim()}`, { role: collabRole }); setCollabHandle(""); reloadCollabs(); }
+    catch (e) { setErr("Could not add collaborator — check the handle exists."); }
+  };
+  const removeCollab = async (h) => {
+    try { await window.OrchisAPI.del(`/v1/repos/${repo.id}/collaborators/${h}`); reloadCollabs(); } catch (e) {}
+  };
+
   const save = async () => {
     setErr(""); setBusy(true);
     try {
@@ -360,6 +381,34 @@ function RepoSettingsModal({ repo, onClose, setRoute }) {
               onKeyDown={e => { if (e.key === "Enter") createBranch(); }}
               placeholder={"new-branch (from " + defaultBranch + ")"} style={{ flex: 1 }} />
             <button className="btn" disabled={!newBranch.trim() || branchBusy} onClick={createBranch}>{branchBusy ? "Creating…" : "Create branch"}</button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <div className="section-title" style={{ marginBottom: 8 }}>Collaborators</div>
+          <div className="card" style={{ overflow: "hidden", marginBottom: 10 }}>
+            <div className="row" style={{ gap: 10, padding: "9px 14px", borderBottom: collabs.length ? "1px solid var(--line)" : "none" }}>
+              <span className="avatar" style={{ background: "var(--accent)", width: 22, height: 22, fontSize: 9, color: "var(--accent-fg)" }}>{(repo.org || "?").slice(0, 2).toUpperCase()}</span>
+              <span style={{ flex: 1, fontSize: 13 }}>{repo.org} <span className="subtle">(owner)</span></span>
+              <span className="chip" style={{ height: 18, fontSize: 10 }}>owner</span>
+            </div>
+            {collabs.map((c, i) => (
+              <div key={c.handle} className="row" style={{ gap: 10, padding: "9px 14px", borderBottom: i < collabs.length - 1 ? "1px solid var(--line)" : "none" }}>
+                <span className="avatar" style={{ background: c.color, width: 22, height: 22, fontSize: 9 }}>{c.initials}</span>
+                <span style={{ flex: 1, fontSize: 13 }}>{c.handle} <span className="subtle">{c.name}</span></span>
+                <span className="chip" style={{ height: 18, fontSize: 10 }}>{c.role}</span>
+                <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={() => removeCollab(c.handle)}>Remove</button>
+              </div>
+            ))}
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="input" value={collabHandle} onChange={e => setCollabHandle(e.target.value)} placeholder="user handle" style={{ flex: 1 }} onKeyDown={e => { if (e.key === "Enter") addCollab(); }} />
+            <select className="input" value={collabRole} onChange={e => setCollabRole(e.target.value)} style={{ width: 110 }}>
+              <option value="read">read</option>
+              <option value="write">write</option>
+              <option value="admin">admin</option>
+            </select>
+            <button className="btn" disabled={!collabHandle.trim()} onClick={addCollab}>Add</button>
           </div>
         </div>
 

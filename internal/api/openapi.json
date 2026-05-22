@@ -58,6 +58,11 @@
       "delete": { "summary": "Delete a repo", "responses": { "204": { "description": "Deleted" } } }
     },
     "/repos/{org}/{name}/tags": { "get": { "summary": "List tags", "responses": { "200": { "description": "[Tag]" } } } },
+    "/repos/{org}/{name}/collaborators": { "get": { "summary": "List collaborators (handle, role)", "responses": { "200": { "description": "[{handle,name,role}]" } } } },
+    "/repos/{org}/{name}/collaborators/{handle}": {
+      "put": { "summary": "Add/update a collaborator (admin only)", "parameters": [{ "name": "handle", "in": "path", "required": true, "schema": { "type": "string" } }], "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "role": { "type": "string", "enum": ["read", "write", "admin"] } }, "required": ["role"] } } } }, "responses": { "200": { "description": "{handle,role}" } } },
+      "delete": { "summary": "Remove a collaborator (admin only)", "parameters": [{ "name": "handle", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "Removed" } } }
+    },
     "/repos/{org}/{name}/releases": {
       "get": { "summary": "List releases", "responses": { "200": { "description": "[Release]" } } },
       "post": { "summary": "Publish a release (owner only; creates the tag if missing)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "tag": { "type": "string" }, "name": { "type": "string" }, "body": { "type": "string" }, "target": { "type": "string" }, "prerelease": { "type": "boolean" } }, "required": ["tag"] } } } }, "responses": { "200": { "description": "Release" } } }

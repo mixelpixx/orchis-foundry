@@ -3364,7 +3364,9 @@ function RepoView({
     };
   }, [repoId]);
   const treeNodes = tree || FILE_TREE;
-  const isOwner = !!(window.USERS && USERS.me && repo.org === USERS.me.handle);
+  // Manage (settings + collaborators) is available to the owner or an admin
+  // collaborator. repo.role comes from the API (owner|admin|write|read|"").
+  const isOwner = repo.role === "owner" || repo.role === "admin" || !!(window.USERS && USERS.me && repo.org === USERS.me.handle);
   const [showSettings, setShowSettings] = React.useState(false);
 
   // Live star/pin state (seeded from the loaded repo, refreshed from the API).
@@ -3848,6 +3850,36 @@ function RepoSettingsModal({
       setErr("Could not delete branch — you can't delete the default branch.");
     }
   };
+
+  // Collaborators
+  const [collabs, setCollabs] = React.useState([]);
+  const [collabHandle, setCollabHandle] = React.useState("");
+  const [collabRole, setCollabRole] = React.useState("write");
+  const reloadCollabs = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get(`/v1/repos/${repo.id}/collaborators`).then(c => setCollabs(c || [])).catch(() => {});
+  }, [repo.id]);
+  React.useEffect(() => {
+    reloadCollabs();
+  }, [reloadCollabs]);
+  const addCollab = async () => {
+    if (!collabHandle.trim()) return;
+    setErr("");
+    try {
+      await window.OrchisAPI.put(`/v1/repos/${repo.id}/collaborators/${collabHandle.trim()}`, {
+        role: collabRole
+      });
+      setCollabHandle("");
+      reloadCollabs();
+    } catch (e) {
+      setErr("Could not add collaborator — check the handle exists.");
+    }
+  };
+  const removeCollab = async h => {
+    try {
+      await window.OrchisAPI.del(`/v1/repos/${repo.id}/collaborators/${h}`);
+      reloadCollabs();
+    } catch (e) {}
+  };
   const save = async () => {
     setErr("");
     setBusy(true);
@@ -4102,6 +4134,118 @@ function RepoSettingsModal({
     disabled: !newBranch.trim() || branchBusy,
     onClick: createBranch
   }, branchBusy ? "Creating…" : "Create branch"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 24
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "section-title",
+    style: {
+      marginBottom: 8
+    }
+  }, "Collaborators"), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      overflow: "hidden",
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 10,
+      padding: "9px 14px",
+      borderBottom: collabs.length ? "1px solid var(--line)" : "none"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "avatar",
+    style: {
+      background: "var(--accent)",
+      width: 22,
+      height: 22,
+      fontSize: 9,
+      color: "var(--accent-fg)"
+    }
+  }, (repo.org || "?").slice(0, 2).toUpperCase()), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 13
+    }
+  }, repo.org, " ", /*#__PURE__*/React.createElement("span", {
+    className: "subtle"
+  }, "(owner)")), /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: {
+      height: 18,
+      fontSize: 10
+    }
+  }, "owner")), collabs.map((c, i) => /*#__PURE__*/React.createElement("div", {
+    key: c.handle,
+    className: "row",
+    style: {
+      gap: 10,
+      padding: "9px 14px",
+      borderBottom: i < collabs.length - 1 ? "1px solid var(--line)" : "none"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "avatar",
+    style: {
+      background: c.color,
+      width: 22,
+      height: 22,
+      fontSize: 9
+    }
+  }, c.initials), /*#__PURE__*/React.createElement("span", {
+    style: {
+      flex: 1,
+      fontSize: 13
+    }
+  }, c.handle, " ", /*#__PURE__*/React.createElement("span", {
+    className: "subtle"
+  }, c.name)), /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: {
+      height: 18,
+      fontSize: 10
+    }
+  }, c.role), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    style: {
+      color: "var(--danger)"
+    },
+    onClick: () => removeCollab(c.handle)
+  }, "Remove")))), /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: collabHandle,
+    onChange: e => setCollabHandle(e.target.value),
+    placeholder: "user handle",
+    style: {
+      flex: 1
+    },
+    onKeyDown: e => {
+      if (e.key === "Enter") addCollab();
+    }
+  }), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: collabRole,
+    onChange: e => setCollabRole(e.target.value),
+    style: {
+      width: 110
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "read"
+  }, "read"), /*#__PURE__*/React.createElement("option", {
+    value: "write"
+  }, "write"), /*#__PURE__*/React.createElement("option", {
+    value: "admin"
+  }, "admin")), /*#__PURE__*/React.createElement("button", {
+    className: "btn",
+    disabled: !collabHandle.trim(),
+    onClick: addCollab
+  }, "Add"))), /*#__PURE__*/React.createElement("div", {
     style: {
       border: "1px solid var(--danger)",
       borderRadius: 8,
