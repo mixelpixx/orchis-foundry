@@ -35,11 +35,15 @@ function PRView({ prId, repo, setRoute }) {
       setActionErr("Merge failed — likely a conflict, or you're not the repo owner.");
     } finally { setMerging(false); }
   };
-  const doReview = async (verdict, body) => {
+  const doReview = async (verdict, body, comments) => {
     if (!window.OrchisAPI || !base) return;
-    await window.OrchisAPI.post(base + "/reviews", { verdict, body, comments: [] }).catch(() => {});
+    await window.OrchisAPI.post(base + "/reviews", { verdict, body, comments: comments || [] }).catch(() => {});
+    setPending([]);
     reload();
   };
+  // Staged line comments for a batched review.
+  const [pending, setPending] = React.useState([]);
+  const addPending = (c) => { setPending(p => [...p, c]); setReviewing(true); };
   const postComment = async (body, extra) => {
     if (!window.OrchisAPI || !base || !body.trim()) return;
     await window.OrchisAPI.post(base + "/comments", { body, ...(extra || {}) }).catch(() => {});
@@ -166,7 +170,7 @@ function PRView({ prId, repo, setRoute }) {
       </div>
 
       <div style={prStyles.body}>
-        {tab === "files" ? <FilesChanged files={files != null ? files : PR_DIFF_FILES} openComment={openComment} setOpenComment={setOpenComment} postComment={postComment} canComment={!!base} /> : null}
+        {tab === "files" ? <FilesChanged files={files != null ? files : PR_DIFF_FILES} openComment={openComment} setOpenComment={setOpenComment} postComment={postComment} addPending={addPending} pending={pending} canComment={!!base} /> : null}
         {tab === "conversation" ? <Conversation pr={pr} comments={comments} postComment={postComment} /> : null}
         {tab === "commits" ? <CommitsList commits={commits} /> : null}
         {tab === "checks" ? <ChecksList checks={checks} /> : null}
@@ -178,8 +182,9 @@ function PRView({ prId, repo, setRoute }) {
           setBody={setReviewBody}
           verdict={reviewVerdict}
           setVerdict={setReviewVerdict}
+          pendingCount={pending.length}
           onCancel={() => setReviewing(false)}
-          onSubmit={() => { doReview(reviewVerdict, reviewBody); setReviewing(false); setReviewBody(""); }}
+          onSubmit={() => { doReview(reviewVerdict, reviewBody, pending); setReviewing(false); setReviewBody(""); }}
         />
       ) : null}
     </div>
@@ -209,11 +214,11 @@ function Stat({ icon, label, value, good }) {
   );
 }
 
-function FilesChanged({ files, openComment, setOpenComment, postComment, canComment }) {
+function FilesChanged({ files, openComment, setOpenComment, postComment, addPending, pending, canComment }) {
   return (
     <div style={{ padding: "16px 20px 40px", maxWidth: 1100, margin: "0 auto" }}>
       {files.map((f, fi) => (
-        <FileDiff key={f.path} file={f} fi={fi} openComment={openComment} setOpenComment={setOpenComment} postComment={postComment} canComment={canComment} />
+        <FileDiff key={f.path} file={f} fi={fi} openComment={openComment} setOpenComment={setOpenComment} postComment={postComment} addPending={addPending} pending={pending} canComment={canComment} />
       ))}
     </div>
   );
@@ -229,7 +234,7 @@ function anchorFor(ln) {
   return Number.isNaN(newN) ? null : { line: newN, side: "right" };
 }
 
-function FileDiff({ file, fi, openComment, setOpenComment, postComment, canComment }) {
+function FileDiff({ file, fi, openComment, setOpenComment, postComment, addPending, pending, canComment }) {
   const [collapsed, setCollapsed] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
 
@@ -241,6 +246,12 @@ function FileDiff({ file, fi, openComment, setOpenComment, postComment, canComme
       await postComment(body.trim(), { path: file.path, line: a.line, side: a.side });
       setOpenComment(null);
     } finally { setBusy(false); }
+  };
+  const stageComment = (ln, body) => {
+    const a = anchorFor(ln);
+    if (!a || !body.trim()) { setOpenComment(null); return; }
+    addPending({ path: file.path, line: a.line, side: a.side, body: body.trim() });
+    setOpenComment(null);
   };
 
   return (
@@ -266,12 +277,14 @@ function FileDiff({ file, fi, openComment, setOpenComment, postComment, canComme
                 const a = anchorFor(ln);
                 const inlineComments = (file.comments || []).filter(c =>
                   a && c.line === a.line && (c.side || "right") === a.side);
+                const stagedHere = a ? (pending || []).filter(c => c.path === file.path && c.line === a.line && c.side === a.side) : [];
                 return (
                   <React.Fragment key={li}>
                     <DiffLine ln={ln} canComment={canComment && !!a} onComment={() => setOpenComment(lineKey)} />
                     {inlineComments.map((c, ci) => <InlineComment key={ci} c={c} />)}
+                    {stagedHere.map((c, ci) => <PendingComment key={"p" + ci} body={c.body} />)}
                     {openComment === lineKey ? (
-                      <NewCommentBox busy={busy} onCancel={() => setOpenComment(null)} onSubmit={(body) => submitComment(ln, body)} />
+                      <NewCommentBox busy={busy} onCancel={() => setOpenComment(null)} onSubmit={(body) => submitComment(ln, body)} onStage={(body) => stageComment(ln, body)} />
                     ) : null}
                   </React.Fragment>
                 );
@@ -320,16 +333,17 @@ function InlineComment({ c }) {
   );
 }
 
-function NewCommentBox({ onCancel, onSubmit, busy }) {
+function NewCommentBox({ onCancel, onSubmit, onStage, busy }) {
   const [v, setV] = React.useState("");
   const submit = () => { if (v.trim()) onSubmit(v); };
+  const stage = () => { if (v.trim()) onStage(v); };
   return (
     <div style={prStyles.inlineComment}>
       <textarea
         value={v}
         onChange={e => setV(e.target.value)}
         onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); } }}
-        placeholder="Leave a comment… ⌘+Enter to submit"
+        placeholder="Leave a comment… ⌘+Enter to comment now"
         style={{
           width: "100%", minHeight: 76, padding: "8px 10px",
           border: "1px solid var(--line)", borderRadius: 6,
@@ -342,8 +356,23 @@ function NewCommentBox({ onCancel, onSubmit, busy }) {
       <div className="row" style={{ gap: 6, marginTop: 8 }}>
         <button className="btn sm" onClick={onCancel}>Cancel</button>
         <span className="spacer" />
+        {onStage ? <button className="btn sm" onClick={stage} disabled={!v.trim() || busy} title="Hold this comment and submit it together with a review verdict">Add to review</button> : null}
         <button className="btn primary sm" onClick={submit} disabled={!v.trim() || busy}>{busy ? "Posting…" : "Comment"}</button>
       </div>
+    </div>
+  );
+}
+
+// PendingComment — a staged (not-yet-submitted) line comment, part of an
+// in-progress batched review.
+function PendingComment({ body }) {
+  return (
+    <div style={{ ...prStyles.inlineComment, borderLeft: "2px solid var(--accent)" }}>
+      <div className="row" style={{ gap: 8, marginBottom: 4 }}>
+        <span className="chip" style={{ height: 16, fontSize: 10, color: "var(--accent)" }}>Pending</span>
+        <span className="subtle" style={{ fontSize: 11 }}>in your review</span>
+      </div>
+      <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--fg-1)", whiteSpace: "pre-wrap" }}>{body}</div>
     </div>
   );
 }
@@ -455,11 +484,12 @@ function ChecksList({ checks }) {
   );
 }
 
-function ReviewBar({ body, setBody, verdict, setVerdict, onCancel, onSubmit }) {
+function ReviewBar({ body, setBody, verdict, setVerdict, onCancel, onSubmit, pendingCount = 0 }) {
   return (
     <div style={prStyles.reviewBar}>
       <div className="row" style={{ gap: 8, marginBottom: 8 }}>
         <span style={{ fontWeight: 500, fontSize: 13 }}>Submit review</span>
+        {pendingCount > 0 ? <span className="chip accent" style={{ height: 18, fontSize: 10.5 }}>{pendingCount} line comment{pendingCount === 1 ? "" : "s"}</span> : null}
         <span className="spacer" />
         <button className="btn ghost icon sm" onClick={onCancel}><Icons.Close size={11} /></button>
       </div>
@@ -487,7 +517,7 @@ function ReviewBar({ body, setBody, verdict, setVerdict, onCancel, onSubmit }) {
           <span style={{ color: "var(--danger)" }}>Request changes</span>
         </label>
         <span className="spacer" />
-        <button className="btn primary sm" onClick={onSubmit}>Submit review</button>
+        <button className="btn primary sm" onClick={onSubmit}>Submit review{pendingCount > 0 ? " (" + pendingCount + ")" : ""}</button>
       </div>
     </div>
   );
