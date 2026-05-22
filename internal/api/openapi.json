@@ -55,6 +55,19 @@
     "/repos/{org}/{name}/readme": { "get": { "summary": "README", "responses": { "200": { "description": "{content,format}" } } } },
     "/repos/{org}/{name}/branches": { "get": { "summary": "List branches", "responses": { "200": { "description": "[Branch]" } } } },
     "/repos/{org}/{name}/commits": { "get": { "summary": "List commits", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }, { "name": "limit", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "[Commit]" } } } },
+    "/repos/{org}/{name}/checks": { "get": { "summary": "Recent check runs across the repo (scan + external CI)", "parameters": [{ "name": "limit", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "[Check]" } } } },
+    "/repos/{org}/{name}/issues": {
+      "get": { "summary": "List issues", "parameters": [{ "name": "state", "in": "query", "schema": { "type": "string", "enum": ["open", "closed", "all"] } }], "responses": { "200": { "description": "[Issue]" } } },
+      "post": { "summary": "Open an issue", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "title": { "type": "string" }, "body": { "type": "string" } }, "required": ["title"] } } } }, "responses": { "200": { "description": "Issue" } } }
+    },
+    "/repos/{org}/{name}/issues/{num}": {
+      "get": { "summary": "Issue detail", "responses": { "200": { "description": "Issue" } } },
+      "patch": { "summary": "Edit issue (title/body/state/assignee)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "title": { "type": "string" }, "body": { "type": "string" }, "state": { "type": "string", "enum": ["open", "closed"] }, "assignee": { "type": "string" } } } } } }, "responses": { "200": { "description": "Issue" } } }
+    },
+    "/repos/{org}/{name}/issues/{num}/comments": {
+      "get": { "summary": "Issue comments", "responses": { "200": { "description": "[Comment]" } } },
+      "post": { "summary": "Comment on an issue", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "body": { "type": "string" } }, "required": ["body"] } } } }, "responses": { "200": { "description": "Comment" } } }
+    },
     "/repos/{org}/{name}/pack": { "get": { "summary": "Whole repo as one markdown document (LLM ingest)", "parameters": [{ "name": "ref", "in": "query", "schema": { "type": "string" } }, { "name": "maxBytes", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "text/markdown" } } } },
     "/search/palette": { "get": { "summary": "Command-palette search (repos, PRs, files)", "parameters": [{ "name": "q", "in": "query", "schema": { "type": "string" } }], "responses": { "200": { "description": "{repos:[],pulls:[],files:[]} each item {id,label,sub,route}" } } } },
     "/pulls": { "get": { "summary": "Pull requests across your repos", "parameters": [{ "name": "filter", "in": "query", "schema": { "type": "string", "enum": ["review-requested", "yours", "mentioned", "all"] } }], "responses": { "200": { "description": "[PullSummary]" } } } },

@@ -117,7 +117,16 @@ func (s *Server) Router() http.Handler {
 		r.Get("/repos/{org}/{name}/readme", s.handleRepoReadme)
 		r.Get("/repos/{org}/{name}/branches", s.handleRepoBranches)
 		r.Get("/repos/{org}/{name}/commits", s.handleRepoCommits)
+		r.Get("/repos/{org}/{name}/checks", s.handleRepoChecks)
 		r.Get("/repos/{org}/{name}/pack", s.handleRepoPack)
+
+		// Issues
+		r.Get("/repos/{org}/{name}/issues", s.handleListIssues)
+		r.Post("/repos/{org}/{name}/issues", s.requireScope("repo:write", s.handleCreateIssue))
+		r.Get("/repos/{org}/{name}/issues/{num}", s.handleGetIssue)
+		r.Patch("/repos/{org}/{name}/issues/{num}", s.requireScope("repo:write", s.handleUpdateIssue))
+		r.Get("/repos/{org}/{name}/issues/{num}/comments", s.handleListIssueComments)
+		r.Post("/repos/{org}/{name}/issues/{num}/comments", s.requireScope("repo:write", s.handleCreateIssueComment))
 
 		// Pull requests (read + create)
 		r.Get("/pulls", s.requireUser(s.handleListPullsGlobal))

@@ -530,13 +530,6 @@ function RecentActivityView() {
 
 // Split panel — shows PRs, Issues, or Actions while you're in the code.
 function SplitPanel({ content, close, setRoute }) {
-  const [pulls, setPulls] = React.useState(null);
-  React.useEffect(() => {
-    if (content.type === "prs" && window.OrchisAPI && content.repo) {
-      window.OrchisAPI.get(`/v1/repos/${content.repo}/pulls?state=open`).then(setPulls).catch(() => setPulls([]));
-    }
-  }, [content.type, content.repo]);
-  const prList = pulls != null ? pulls : PRS.filter(p => p.repo === content.repo);
   return (
     <>
       <div style={repoStyles.splitHead}>
@@ -547,69 +540,201 @@ function SplitPanel({ content, close, setRoute }) {
         <button className="btn ghost icon sm" onClick={close} title="Close split"><Icons.Close size={11} /></button>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
-        {content.type === "prs" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {prList.length === 0 ? <div className="subtle" style={{ fontSize: 12, padding: 8 }}>No open pull requests.</div> : null}
-            {prList.map(p => (
-              <button key={p.id} className="card" style={repoStyles.prMini} onClick={() => setRoute({ view: "pr", pr: p.id, repo: content.repo })}>
-                <Icons.PR size={14} style={{ color: "var(--accent)" }} />
-                <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
-                  <div style={{ fontSize: 13, fontWeight: 450, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</div>
-                  <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>#{p.id} · by {p.author.name} · {p.updated}</div>
-                </div>
-                <span className="chip" style={{ height: 18, fontSize: 10.5 }}>+{p.additions} −{p.deletions}</span>
-              </button>
-            ))}
-          </div>
-        ) : content.type === "issues" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <IssueMini num={911} title="Memory growth under fallback-only routing" assignee={USERS.me} />
-            <IssueMini num={908} title="Document the `--no-fallback` flag in deploy.md" assignee={USERS.jana} />
-            <IssueMini num={902} title="Add Prometheus metric for dropped envelopes" assignee={null} />
-            <IssueMini num={891} title="Crash on empty destination string" assignee={USERS.sam} closed />
-          </div>
-        ) : (
-          <ActionsList />
-        )}
+        {content.type === "prs" ? <PRsSplit repo={content.repo} setRoute={setRoute} />
+          : content.type === "issues" ? <IssuesSplit repo={content.repo} />
+          : <ActionsSplit repo={content.repo} />}
       </div>
     </>
   );
 }
 
-function IssueMini({ num, title, assignee, closed }) {
+function PRsSplit({ repo, setRoute }) {
+  const [pulls, setPulls] = React.useState(null);
+  React.useEffect(() => {
+    if (window.OrchisAPI && repo) window.OrchisAPI.get(`/v1/repos/${repo}/pulls?state=open`).then(setPulls).catch(() => setPulls([]));
+  }, [repo]);
+  const prList = pulls != null ? pulls : (window.OrchisAPI ? [] : PRS.filter(p => p.repo === repo));
   return (
-    <div className="card" style={repoStyles.prMini}>
-      <Icons.Issue size={14} style={{ color: closed ? "var(--purple)" : "var(--info)" }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 450, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-        <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>#{num}{closed ? " · closed" : ""}</div>
-      </div>
-      {assignee ? <span className="avatar" style={{ background: assignee.color, width: 18, height: 18, fontSize: 8 }}>{assignee.initials}</span> : null}
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {prList.length === 0 ? <div className="subtle" style={{ fontSize: 12, padding: 8 }}>No open pull requests.</div> : null}
+      {prList.map(p => (
+        <button key={p.id} className="card" style={repoStyles.prMini} onClick={() => setRoute({ view: "pr", pr: p.id, repo })}>
+          <Icons.PR size={14} style={{ color: "var(--accent)" }} />
+          <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+            <div style={{ fontSize: 13, fontWeight: 450, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>#{p.id} · by {p.author.name} · {p.updated}</div>
+          </div>
+          <span className="chip" style={{ height: 18, fontSize: 10.5 }}>+{p.additions} −{p.deletions}</span>
+        </button>
+      ))}
     </div>
   );
 }
 
-function ActionsList() {
-  const runs = [
-    { id: 1, name: "ci", branch: "main", commit: "a3f9c12", status: "ok", dur: "2m 41s", when: "12 min ago", actor: USERS.bot },
-    { id: 2, name: "ci", branch: "jana/bounded-fallback", commit: "8c1bba0", status: "pending", dur: "running…", when: "8 min ago", actor: USERS.jana },
-    { id: 3, name: "release", branch: "main", commit: "f4218a1", status: "ok", dur: "5m 03s", when: "yesterday", actor: USERS.bot },
-    { id: 4, name: "ci", branch: "sam/diff-contrast", commit: "11a229c", status: "fail", dur: "1m 12s", when: "yesterday", actor: USERS.sam },
-  ];
+function IssuesSplit({ repo }) {
+  const [items, setItems] = React.useState(null);
+  const [selected, setSelected] = React.useState(null);   // issue number
+  const [creating, setCreating] = React.useState(false);
+  const [title, setTitle] = React.useState("");
+  const [body, setBody] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const reload = React.useCallback(() => {
+    if (window.OrchisAPI && repo) window.OrchisAPI.get(`/v1/repos/${repo}/issues`).then(setItems).catch(() => setItems([]));
+  }, [repo]);
+  React.useEffect(() => { reload(); }, [reload]);
+
+  const list = items != null ? items : [];
+
+  const create = async () => {
+    if (!title.trim()) return;
+    setBusy(true);
+    try {
+      await window.OrchisAPI.post(`/v1/repos/${repo}/issues`, { title: title.trim(), body: body.trim() });
+      setTitle(""); setBody(""); setCreating(false); reload();
+    } catch (e) {} finally { setBusy(false); }
+  };
+
+  if (selected != null) {
+    return <IssueDetail repo={repo} num={selected} onBack={() => { setSelected(null); reload(); }} />;
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {runs.map(r => (
-        <div key={r.id} className="card" style={repoStyles.prMini}>
+      {window.OrchisAPI ? (
+        creating ? (
+          <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="Issue title" autoFocus />
+            <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Describe it… (optional)" style={{
+              width: "100%", height: 70, padding: 8, border: "1px solid var(--line)", borderRadius: 6,
+              fontFamily: "inherit", fontSize: 12.5, background: "var(--bg-1)", color: "var(--fg)", resize: "vertical",
+            }} />
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn sm" onClick={() => { setCreating(false); setTitle(""); setBody(""); }}>Cancel</button>
+              <span className="spacer" />
+              <button className="btn primary sm" onClick={create} disabled={!title.trim() || busy}>{busy ? "Opening…" : "Open issue"}</button>
+            </div>
+          </div>
+        ) : (
+          <button className="btn sm" style={{ alignSelf: "flex-start", marginBottom: 2 }} onClick={() => setCreating(true)}>
+            <Icons.Plus size={12} /> New issue
+          </button>
+        )
+      ) : null}
+
+      {list.length === 0 ? <div className="subtle" style={{ fontSize: 12, padding: 8 }}>No issues yet.</div> : null}
+      {list.map(it => (
+        <button key={it.number} className="card" style={repoStyles.prMini} onClick={() => setSelected(it.number)}>
+          <Icons.Issue size={14} style={{ color: it.closed ? "var(--purple)" : "var(--info)" }} />
+          <div style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+            <div style={{ fontSize: 13, fontWeight: 450, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title}</div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>#{it.number}{it.closed ? " · closed" : ""} · {it.comments || 0} comment{it.comments === 1 ? "" : "s"}</div>
+          </div>
+          {it.assignee ? <span className="avatar" style={{ background: it.assignee.color, width: 18, height: 18, fontSize: 8 }}>{it.assignee.initials}</span> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function IssueDetail({ repo, num, onBack }) {
+  const [issue, setIssue] = React.useState(null);
+  const [comments, setComments] = React.useState([]);
+  const [draft, setDraft] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(() => {
+    if (!window.OrchisAPI) return;
+    window.OrchisAPI.get(`/v1/repos/${repo}/issues/${num}`).then(setIssue).catch(() => setIssue(null));
+    window.OrchisAPI.get(`/v1/repos/${repo}/issues/${num}/comments`).then(setComments).catch(() => setComments([]));
+  }, [repo, num]);
+  React.useEffect(() => { load(); }, [load]);
+
+  const comment = async () => {
+    if (!draft.trim()) return;
+    setBusy(true);
+    try { await window.OrchisAPI.post(`/v1/repos/${repo}/issues/${num}/comments`, { body: draft.trim() }); setDraft(""); load(); }
+    catch (e) {} finally { setBusy(false); }
+  };
+  const toggleState = async () => {
+    if (!issue) return;
+    setBusy(true);
+    try { const r = await window.OrchisAPI.patch(`/v1/repos/${repo}/issues/${num}`, { state: issue.closed ? "open" : "closed" }); setIssue(r); }
+    catch (e) {} finally { setBusy(false); }
+  };
+
+  if (!issue) return <div className="subtle" style={{ fontSize: 12, padding: 8 }}>Loading…</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <button className="btn ghost sm" style={{ alignSelf: "flex-start" }} onClick={onBack}>← All issues</button>
+      <div className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+        <Icons.Issue size={16} style={{ color: issue.closed ? "var(--purple)" : "var(--info)", marginTop: 2 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 500 }}>{issue.title}</div>
+          <div className="subtle" style={{ fontSize: 11.5, marginTop: 3 }}>
+            #{issue.number} · <span className="chip" style={{ height: 18, fontSize: 10.5, color: issue.closed ? "var(--purple)" : "var(--accent)" }}>{issue.closed ? "closed" : "open"}</span> · opened by {issue.author.name} · {issue.created}
+          </div>
+        </div>
+      </div>
+      {issue.body ? <div className="card" style={{ padding: 12, fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{issue.body}</div> : null}
+
+      {comments.map((c, i) => (
+        <div key={i} className="card" style={{ padding: 12 }}>
+          <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+            <span className="avatar" style={{ background: c.author.color, width: 18, height: 18, fontSize: 8 }}>{c.author.initials}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 500 }}>{c.author.name}</span>
+            <span className="subtle" style={{ fontSize: 11 }}>{c.when}</span>
+          </div>
+          <div style={{ fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{c.body}</div>
+        </div>
+      ))}
+
+      {window.OrchisAPI ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder="Leave a comment…" style={{
+            width: "100%", height: 64, padding: 8, border: "1px solid var(--line)", borderRadius: 6,
+            fontFamily: "inherit", fontSize: 12.5, background: "var(--bg-1)", color: "var(--fg)", resize: "vertical",
+          }} />
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn sm" onClick={toggleState} disabled={busy}>{issue.closed ? "Reopen" : "Close issue"}</button>
+            <span className="spacer" />
+            <button className="btn primary sm" onClick={comment} disabled={!draft.trim() || busy}>Comment</button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ActionsSplit({ repo }) {
+  const [runs, setRuns] = React.useState(null);
+  React.useEffect(() => {
+    if (window.OrchisAPI && repo) window.OrchisAPI.get(`/v1/repos/${repo}/checks`).then(setRuns).catch(() => setRuns([]));
+  }, [repo]);
+  const list = runs != null ? runs : [];
+  if (runs != null && list.length === 0) {
+    return (
+      <div className="card" style={{ padding: 16, fontSize: 12.5, color: "var(--fg-2)", lineHeight: 1.55 }}>
+        <div style={{ fontWeight: 500, color: "var(--fg)", marginBottom: 6 }}>No check runs yet</div>
+        Foundry doesn't execute workflows itself. Check runs appear here from the built-in <span className="mono">orchis-scan</span> supply-chain check, and from any external CI you wire up via webhooks + the checks API.
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {list.map((r, i) => (
+        <div key={i} className="card" style={repoStyles.prMini}>
           <span style={{
             width: 8, height: 8, borderRadius: 999,
-            background: r.status === "ok" ? "var(--accent)" : r.status === "fail" ? "var(--danger)" : "var(--warn)",
-            boxShadow: r.status === "pending" ? "0 0 0 3px color-mix(in oklab, var(--warn) 25%, transparent)" : "none",
+            background: r.status === "ok" ? "var(--accent)" : r.status === "fail" ? "var(--danger)" : r.status === "cancelled" ? "var(--fg-3)" : "var(--warn)",
+            boxShadow: r.status === "pending" || r.status === "queued" ? "0 0 0 3px color-mix(in oklab, var(--warn) 25%, transparent)" : "none",
           }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 450 }}>{r.name} <span className="mono subtle" style={{ fontSize: 11.5 }}>· {r.branch}@{r.commit}</span></div>
-            <div className="subtle" style={{ fontSize: 11, marginTop: 2 }}>{r.dur} · {r.when}</div>
+            <div style={{ fontSize: 13, fontWeight: 450 }}>{r.name} <span className="mono subtle" style={{ fontSize: 11.5 }}>· {r.sha}</span></div>
+            <div className="subtle" style={{ fontSize: 11, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.detail || r.status}{r.when ? " · " + r.when : ""}</div>
           </div>
-          <span className="avatar" style={{ background: r.actor.color, width: 18, height: 18, fontSize: 8 }}>{r.actor.initials}</span>
+          {r.externalUrl ? <a className="btn ghost sm" href={r.externalUrl} target="_blank" rel="noreferrer">View</a> : null}
         </div>
       ))}
     </div>

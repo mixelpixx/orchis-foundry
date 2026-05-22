@@ -136,6 +136,8 @@ function activityVerb(k) {
     case "pr_merged": return "merged";
     case "pr_reviewed": return "reviewed";
     case "pr_commented": return "commented on";
+    case "issue_opened": return "opened issue";
+    case "issue_closed": return "closed issue";
     case "scan_flagged": return "flagged";
     // legacy mock kinds
     case "pr_review_requested": return "requested your review on";
