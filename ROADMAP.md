@@ -7,16 +7,20 @@ deployments. They are **not implemented yet** — listed here honestly, with rou
 effort, so a prospective owner can scope and prioritize.
 
 Foundations that make these cheaper: the schema already contains unused `orgs`
-and `org_members` tables, the config layer already models multiple OIDC
-providers, and auth/ACL is centralized (`internal/auth`, `internal/api/acl.go`).
+and `org_members` tables, and auth/ACL is centralized (`internal/auth`,
+`internal/api/acl.go`).
 
-## Identity & access (highest demand)
-- **Generic OIDC + local username/password login** — today only GitHub OIDC is
-  wired; config already has generic-OIDC fields. *(~2–3 weeks)*
-- **SAML SSO** for enterprise IdPs (Okta, Entra). *(~2–3 weeks)*
-- **User admin & lifecycle** — invite, role assignment, disable/deprovision; plus
-  an **audit log** of admin/auth actions (a common compliance requirement).
-  *(~3 weeks)*
+## Already shipped
+- **Local email+password** accounts (Argon2id).
+- **Generic OIDC** (Microsoft Entra ID, Google, Okta, Keycloak, …) + GitHub.
+- **Admin panel**: toggle sign-in methods; create / disable (deprovision) /
+  grant-admin / reset-password users.
+
+## Identity & access (next)
+- **SAML SSO** for IdPs that require it (some Okta/ADFS setups). *(~2–3 weeks)*
+- **Audit log** of admin/auth actions (common compliance requirement). *(~1–2 weeks)*
+- **SCIM** auto-provisioning + **invite links** + self-service password reset
+  (reset needs email — see below). *(~2 weeks)*
 - **2FA / MFA** enforcement. *(~1 week)*
 
 ## Collaboration at scale

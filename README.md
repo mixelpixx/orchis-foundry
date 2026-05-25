@@ -12,7 +12,14 @@ Live instance: **https://foundry.orchis.ai**
 ## What it does
 
 **Auth & access**
-- GitHub OIDC sign-in; DB-backed opaque sessions (HttpOnly, SameSite cookies).
+- **Sign in three ways**, each toggled by an admin: local **email + password**
+  (Argon2id), any standards-compliant **OIDC** provider (Microsoft Entra ID,
+  Google, Okta, Keycloak, …), and **GitHub**. The sign-in screen shows only the
+  methods that are enabled.
+- **Admin panel** (instance admins) to choose which sign-in methods are on and to
+  manage users — create accounts, grant/remove admin, **disable (deprovision)**,
+  reset passwords. Disabling a user immediately revokes their sessions.
+- DB-backed opaque sessions (HttpOnly, Secure, SameSite cookies; IP/UA-bound).
 - Personal access tokens (`orc_pat_…`, Argon2id-hashed, scoped, shown once).
 - SSH keys for git over SSH.
 - **Per-repo RBAC** — collaborators with `read` / `write` / `admin` roles; the
@@ -63,14 +70,54 @@ it is honest about that, and the gaps below are the documented roadmap
 | Git over HTTPS + SSH, branches, tags, releases | Organizations / teams (per-repo collaborators only) |
 | PRs: inline comments, batched reviews, merge/squash/rebase | Branch protection / required-review merge gating |
 | Issues, webhooks (HMAC, retries) | Native CI/CD ("Actions"), package registry, Git LFS |
-| GitHub OIDC sign-in, Argon2id PATs, SSH keys | Generic OIDC / SAML, **local username+password** login |
-| Per-repo RBAC (read/write/admin) | Admin UI: user invite / disable / **deprovision**, audit log |
-| AI change-proposal review gate + supply-chain scanner (BYO model) | Email notifications, 2FA/MFA |
-| Code search (`git grep`), ⌘K palette, SSE realtime | Prometheus metrics; Postgres backend (SQLite only today) |
-| Daily SQLite backup timer, single-binary deploy | Horizontal scale / multi-tenant SaaS |
+| Local email+password, OIDC (Entra/Google/Okta/…), GitHub | SAML; SCIM auto-provisioning |
+| Admin UI: enable sign-in methods, create/disable/deprovision users | Audit log; self-service password reset (needs email) |
+| Per-repo RBAC (read/write/admin); Argon2id PATs; SSH keys | Email notifications, 2FA/MFA |
+| AI change-proposal review gate + supply-chain scanner (BYO model) | Prometheus metrics |
+| Code search (`git grep`), ⌘K palette, SSE realtime | Postgres backend (SQLite only today) |
+| Daily SQLite backup timer, single-binary + Docker deploy | Horizontal scale / multi-tenant SaaS |
 
 > Sized for teams up to ~25–50 active users on a single node. For larger or
 > regulated deployments, see the roadmap items (SSO/SAML, audit log, Postgres).
+
+---
+
+## Authentication (how it works)
+
+Three sign-in methods, all optional and toggled by an instance admin in
+**Admin → Authentication**:
+
+- **Email + password** — local accounts. Passwords are hashed with Argon2id
+  (never stored in plaintext). "Open sign-up" lets anyone register; leave it off
+  and have an admin create accounts instead.
+- **OIDC** — any standards-compliant provider. Configure it in `orchis.yaml`
+  under `oidc:` with the provider's **issuer URL**, **client ID**, and **client
+  secret**; the server discovers the rest and verifies the ID token's signature.
+  Examples: Microsoft **Entra ID** (`issuer: https://login.microsoftonline.com/<tenant>/v2.0`),
+  **Google** (`https://accounts.google.com`), Okta, Keycloak.
+- **GitHub** — built-in OAuth2 (GitHub isn't a compliant OIDC issuer, so it has
+  its own path).
+
+```yaml
+# orchis.yaml — add the providers you want; they appear on the sign-in screen
+oidc:
+  - id: entra
+    issuer: https://login.microsoftonline.com/<tenant-id>/v2.0
+    client_id: "<app-client-id>"
+    client_secret: "${ENTRA_CLIENT_SECRET}"
+  - id: google
+    issuer: https://accounts.google.com
+    client_id: "<...>.apps.googleusercontent.com"
+    client_secret: "${GOOGLE_CLIENT_SECRET}"
+```
+
+Notes:
+- The **first user** to sign in (any method) becomes the instance admin. Bootstrap
+  a fresh instance without a browser via `orchis-foundry --mint-token <name>`.
+- A redirect/callback is served at `/v1/auth/oidc/callback`; register that URL
+  with each provider. `external_url` in config must be the public base URL.
+- Sessions are opaque, server-side, and revoked immediately when a user is
+  disabled. Client secrets live only in config — never in the database or UI.
 
 ---
 
