@@ -1037,8 +1037,16 @@ function parseMd(md) {
   return out;
 }
 
+// escapeHtml neutralizes user-authored content before it is injected via
+// dangerouslySetInnerHTML. inlineMd escapes the whole line first, then layers
+// trusted markdown HTML (code/bold/links) on top — so a README or comment
+// containing `<img onerror=…>` renders as inert text, not script.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 function inlineMd(s) {
-  return s
+  return escapeHtml(s)
     .replace(/`([^`]+)`/g, "<code style=\"font-family: var(--font-mono); background: var(--bg-2); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;\">$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     // Render real links, but only for http(s)/root-relative URLs — anything else

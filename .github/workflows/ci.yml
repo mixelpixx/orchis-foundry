@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    name: Go build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - run: go build ./...
+      - run: go test ./...   # git is preinstalled on the runner (needed by internal/git tests)
+
+  web:
+    name: Frontend transpile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install build toolchain
+        working-directory: build
+        run: npm install
+      - name: Babel-check JSX (web/src is the source of the shipped bundle)
+        working-directory: build
+        run: |
+          set -e
+          for f in ../web/src/app.jsx ../web/src/sidebar.jsx ../web/src/icons.jsx ../web/src/data.jsx ../web/src/palette.jsx \
+                   ../web/src/views/repo.jsx ../web/src/views/devsettings.jsx ../web/src/views/dashboard.jsx ../web/src/views/pr.jsx; do
+            node node_modules/@babel/cli/bin/babel.js --presets @babel/preset-react "$f" > /dev/null
+          done
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t orchis-foundry:ci .

@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/orchis-ai/foundry/internal/netguard"
 )
 
 // Worker owns the delivery loop.
@@ -212,6 +214,11 @@ func (w *Worker) deliver(ctx context.Context, id, webhookID int64, uuid, event, 
 }
 
 func (w *Worker) post(ctx context.Context, url, secret, uuid, event, payload string) (int, error) {
+	// Re-validate at delivery time (defense against DNS rebinding or a target
+	// that became internal after it was saved).
+	if err := netguard.ValidateOutboundURL(url); err != nil {
+		return 0, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader([]byte(payload)))
 	if err != nil {
 		return 0, err

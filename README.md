@@ -50,6 +50,30 @@ flatten a repo or PR into one markdown document for ingestion.
 
 ---
 
+## Who it's for & scope
+
+Orchis Foundry is a **self-hosted Git + code-review platform for solo developers
+and small teams** who want their code in-house, with an AI review gate and
+supply-chain scanning built in. It is **not** an enterprise GitHub replacement —
+it is honest about that, and the gaps below are the documented roadmap
+(see [`ROADMAP.md`](ROADMAP.md)), not hidden surprises.
+
+| Included today | Not yet (roadmap) |
+|---|---|
+| Git over HTTPS + SSH, branches, tags, releases | Organizations / teams (per-repo collaborators only) |
+| PRs: inline comments, batched reviews, merge/squash/rebase | Branch protection / required-review merge gating |
+| Issues, webhooks (HMAC, retries) | Native CI/CD ("Actions"), package registry, Git LFS |
+| GitHub OIDC sign-in, Argon2id PATs, SSH keys | Generic OIDC / SAML, **local username+password** login |
+| Per-repo RBAC (read/write/admin) | Admin UI: user invite / disable / **deprovision**, audit log |
+| AI change-proposal review gate + supply-chain scanner (BYO model) | Email notifications, 2FA/MFA |
+| Code search (`git grep`), ⌘K palette, SSE realtime | Prometheus metrics; Postgres backend (SQLite only today) |
+| Daily SQLite backup timer, single-binary deploy | Horizontal scale / multi-tenant SaaS |
+
+> Sized for teams up to ~25–50 active users on a single node. For larger or
+> regulated deployments, see the roadmap items (SSO/SAML, audit log, Postgres).
+
+---
+
 ## Stack
 
 | Layer | Choice |
@@ -76,6 +100,22 @@ cd build && npm install && npm run build   # → web/app.bundle.js + web/vendor/
 `go:embed`. CSP is locked to `script-src 'self'`.
 
 ---
+
+## Quick start (Docker)
+
+```bash
+docker compose up --build      # then open http://localhost:8080
+```
+
+Edit `ORCHIS_SESSION_KEY` in `docker-compose.yml` first (`openssl rand -base64 32`).
+Web-UI login needs an OIDC provider — see the commented `oidc:` config mount in
+`docker-compose.yml` and `docs/deploy.md`. To exercise the API/git without OIDC:
+
+```bash
+docker compose exec orchis orchis-foundry --mint-token admin   # prints a PAT
+```
+
+…or just click around the hosted demo at **https://foundry.orchis.ai**.
 
 ## Build & run (local)
 

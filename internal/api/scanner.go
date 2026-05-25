@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/orchis-ai/foundry/internal/netguard"
 	"github.com/orchis-ai/foundry/internal/scan"
 )
 
@@ -87,6 +88,15 @@ func (s *Server) handlePutScanner(w http.ResponseWriter, r *http.Request) {
 	if in.Provider != "anthropic" && in.Provider != "openai_compatible" {
 		writeError(w, http.StatusBadRequest, "provider must be 'anthropic' or 'openai_compatible'")
 		return
+	}
+	// SSRF guard: an OpenAI-compatible base URL is owner-supplied and gets
+	// called server-side, so it must not point at internal/metadata addresses
+	// (unless the operator opted in via ORCHIS_ALLOW_INTERNAL_TARGETS).
+	if in.Provider == "openai_compatible" && in.BaseURL != "" {
+		if err := netguard.ValidateOutboundURL(in.BaseURL); err != nil {
+			writeError(w, http.StatusBadRequest, "base URL rejected: "+err.Error())
+			return
+		}
 	}
 	// Clamp the budgets to sane ranges (defaults when unset/out of range).
 	if in.ContextBudget < 1000 || in.ContextBudget > 200000 {

@@ -1,0 +1,38 @@
+# Quick start:  docker compose up --build
+# Then open http://localhost:8080
+#
+# Logging into the web UI requires an OIDC provider (see the commented config
+# mount below). To try the API without OIDC, mint an admin token:
+#   docker compose exec orchis orchis-foundry --mint-token admin
+# or click around the hosted demo at https://foundry.orchis.ai
+
+services:
+  orchis:
+    build:
+      context: .
+      args:
+        VERSION: docker
+    image: orchis-foundry:local
+    ports:
+      - "8080:8080"   # web UI + REST API
+      - "2222:2222"   # git over SSH
+    environment:
+      ORCHIS_HTTP_ADDR: ":8080"
+      ORCHIS_EXTERNAL_URL: "http://localhost:8080"
+      ORCHIS_DB_PATH: "/var/lib/orchis-foundry/foundry.db"
+      ORCHIS_REPOS_DIR: "/var/lib/orchis-foundry/repos"
+      ORCHIS_SSH_HOST_KEY: "/var/lib/orchis-foundry/ssh_host_ed25519_key"
+      # REQUIRED — change before any real use. Generate: openssl rand -base64 32
+      ORCHIS_SESSION_KEY: "CHANGE_ME_base64_32_bytes_xxxxxxxxxxxxxxxxxxx="
+      # Optional — enables the AI supply-chain scanner / in-PR assist:
+      # ANTHROPIC_API_KEY: "sk-ant-..."
+    volumes:
+      - orchis-data:/var/lib/orchis-foundry
+      # To enable GitHub (or generic) OIDC login, create an orchis.yaml with an
+      # `oidc:` block (see docs/deploy.md), then uncomment these two lines:
+      # - ./orchis.yaml:/etc/orchis-foundry/config.yaml:ro
+    # command: ["--config", "/etc/orchis-foundry/config.yaml"]
+    restart: unless-stopped
+
+volumes:
+  orchis-data:

@@ -1,0 +1,9 @@
+.git
+dist
+*.db
+*.db-shm
+*.db-wal
+build/node_modules
+node_modules
+.claude
+*.log

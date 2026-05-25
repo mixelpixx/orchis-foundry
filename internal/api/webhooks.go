@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/orchis-ai/foundry/internal/netguard"
 )
 
 // knownEvents mirrors the event chips in WebhooksPanel (src/views/devsettings.jsx).
@@ -116,8 +118,8 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if !strings.HasPrefix(in.URL, "http://") && !strings.HasPrefix(in.URL, "https://") {
-		writeError(w, http.StatusBadRequest, "url must be http(s)")
+	if err := netguard.ValidateOutboundURL(in.URL); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	events := cleanEvents(in.Events)
@@ -163,8 +165,8 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.URL != nil {
-		if !strings.HasPrefix(*in.URL, "http://") && !strings.HasPrefix(*in.URL, "https://") {
-			writeError(w, http.StatusBadRequest, "url must be http(s)")
+		if err := netguard.ValidateOutboundURL(*in.URL); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		s.db.ExecContext(r.Context(), `UPDATE webhooks SET url = ? WHERE id = ?`, *in.URL, id)
