@@ -640,9 +640,9 @@ function ScannerPanel() {
     if (window.OrchisAPI) {
       window.OrchisAPI.get("/v1/me/scanner")
         .then(c => setCfg({ ...c, apiKey: "" }))
-        .catch(() => setCfg({ enabled: false, provider: "anthropic", baseUrl: "", model: "", hasKey: false, apiKey: "" }));
+        .catch(() => setCfg({ enabled: false, provider: "anthropic", baseUrl: "", model: "", hasKey: false, apiKey: "", contextBudget: 8000, maxOutputTokens: 2048, pruneGlobs: "" }));
     } else {
-      setCfg({ enabled: false, provider: "anthropic", baseUrl: "", model: "", hasKey: false, apiKey: "" });
+      setCfg({ enabled: false, provider: "anthropic", baseUrl: "", model: "", hasKey: false, apiKey: "", contextBudget: 8000, maxOutputTokens: 2048, pruneGlobs: "" });
     }
   }, []);
 
@@ -652,7 +652,12 @@ function ScannerPanel() {
   const save = async () => {
     setErr(""); setSaved(false);
     try {
-      const body = { enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model };
+      const body = {
+        enabled: cfg.enabled, provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model,
+        contextBudget: Number(cfg.contextBudget) || 8000,
+        maxOutputTokens: Number(cfg.maxOutputTokens) || 2048,
+        pruneGlobs: cfg.pruneGlobs || "",
+      };
       if (cfg.apiKey) body.apiKey = cfg.apiKey;
       const res = await window.OrchisAPI.put("/v1/me/scanner", body);
       setCfg({ ...res, apiKey: "" });
@@ -705,6 +710,26 @@ function ScannerPanel() {
         <Field label="API key" hint={cfg.hasKey ? "A key is saved. Leave blank to keep it; type to replace." : (isAnthropic ? "Your Anthropic API key (sk-ant-…)" : "Optional — many local servers need no key")}>
           <input className="input" type="password" value={cfg.apiKey} onChange={e => set("apiKey", e.target.value)} placeholder={cfg.hasKey ? "•••••••• (saved)" : ""} autoComplete="off" />
         </Field>
+
+        <div style={{ borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+          <div className="section-title" style={{ marginBottom: 4 }}>Context budget</div>
+          <p className="subtle" style={{ fontSize: 11.5, margin: "0 0 10px" }}>
+            Cap how much context is fed to the model — protects local VRAM and cloud cost. Pruning strips
+            dependencies, build output, and lockfiles before anything reaches the model.
+          </p>
+          <Field label={`Input budget — ~${Number(cfg.contextBudget).toLocaleString()} tokens`} hint="Approximate cap on context sent per request (1k–200k).">
+            <input type="range" min="1000" max="64000" step="1000" value={cfg.contextBudget}
+              onChange={e => set("contextBudget", e.target.value)} style={{ width: "100%" }} />
+          </Field>
+          <Field label="Max output tokens" hint="Generation cap passed to the provider (256–32000).">
+            <input className="input" type="number" min="256" max="32000" step="256" value={cfg.maxOutputTokens}
+              onChange={e => set("maxOutputTokens", e.target.value)} />
+          </Field>
+          <Field label="Extra prune globs" hint="Newline- or comma-separated path globs to also exclude, e.g. *.snap, generated/*, *.pb.go">
+            <textarea className="input" rows={2} value={cfg.pruneGlobs}
+              onChange={e => set("pruneGlobs", e.target.value)} placeholder="*.snap, generated/*" style={{ resize: "vertical", fontFamily: "var(--font-mono)" }} />
+          </Field>
+        </div>
 
         <div className="row">
           <span className="subtle" style={{ fontSize: 11.5 }}>Your key is stored server-side and never shown back to the browser.</span>

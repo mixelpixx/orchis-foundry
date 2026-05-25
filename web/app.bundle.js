@@ -969,6 +969,13 @@ const Icons = {
       d: "M4 2v10M2 4h4M11 4v8M9 12h4"
     }))
   })),
+  Edit: p => /*#__PURE__*/React.createElement(Icon, _extends({}, p, {
+    d: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+      d: "M10.5 2.5l3 3L6 13l-3.5 1 1-3.5z"
+    }), /*#__PURE__*/React.createElement("path", {
+      d: "M9 4l3 3"
+    }))
+  })),
   Pin: p => /*#__PURE__*/React.createElement(Icon, _extends({}, p, {
     d: "M10 2l4 4-1.5 1.5-1-1L8 10.5l-2 .5-1 3 3-1 .5-2L11.5 7l-1-1z"
   })),
@@ -3357,6 +3364,19 @@ function RepoView({
   const [treeWidth, setTreeWidth] = React.useState(260);
   const [mainSplit, setMainSplit] = React.useState(0.55);
 
+  // Files the user pinned into LLM context (persisted per-repo in localStorage).
+  const [pins, setPins] = React.useState(() => loadPins(repoId));
+  React.useEffect(() => {
+    setPins(loadPins(repoId));
+  }, [repoId]);
+  const togglePinFile = React.useCallback(path => {
+    setPins(prev => {
+      const next = prev.includes(path) ? prev.filter(x => x !== path) : [...prev, path];
+      savePins(repoId, next);
+      return next;
+    });
+  }, [repoId]);
+
   // Live file tree for this repo (falls back to the mock when offline).
   const [tree, setTree] = React.useState(null);
   React.useEffect(() => {
@@ -3520,7 +3540,9 @@ function RepoView({
     active: active,
     toggle: toggle,
     onPick: onPickFile,
-    depth: 0
+    depth: 0,
+    pins: pins,
+    onPinPath: togglePinFile
   }))), /*#__PURE__*/React.createElement("div", {
     style: repoStyles.resizer,
     onMouseDown: startTreeResize
@@ -3572,8 +3594,29 @@ function RepoView({
     active: active,
     tab: tab,
     setTab: setTab,
-    setActive: onPickFile
-  })))));
+    setActive: onPickFile,
+    setRoute: setRoute
+  }))), /*#__PURE__*/React.createElement(ChatDock, {
+    repoId: repoId,
+    repo: repo,
+    pins: pins,
+    onUnpin: togglePinFile
+  })));
+}
+
+// Pin persistence — per-repo, client-side (localStorage). Survives reloads;
+// sent with every chat request so pinned files stay in the model's context.
+function loadPins(repoId) {
+  try {
+    return JSON.parse(localStorage.getItem("orchis:pins:" + repoId) || "[]");
+  } catch (e) {
+    return [];
+  }
+}
+function savePins(repoId, pins) {
+  try {
+    localStorage.setItem("orchis:pins:" + repoId, JSON.stringify(pins));
+  } catch (e) {}
 }
 function collectInitialExpanded(nodes, acc = {}) {
   nodes.forEach(n => {
@@ -3590,11 +3633,15 @@ function FileTree({
   active,
   toggle,
   onPick,
-  depth
+  depth,
+  pins,
+  onPinPath
 }) {
+  const pinned = pins || [];
   return nodes.map(n => {
     const isOpen = expanded[n.path];
     const isActive = n.type === "file" && active === n.path;
+    const isPinned = pinned.includes(n.path);
     return /*#__PURE__*/React.createElement(React.Fragment, {
       key: n.path
     }, /*#__PURE__*/React.createElement("button", {
@@ -3603,7 +3650,12 @@ function FileTree({
         ...(isActive ? repoStyles.treeRowActive : {}),
         paddingLeft: 6 + depth * 14
       },
-      onClick: () => n.type === "dir" ? toggle(n.path) : onPick(n)
+      onClick: () => n.type === "dir" ? toggle(n.path) : onPick(n),
+      onContextMenu: onPinPath && n.type === "file" ? e => {
+        e.preventDefault();
+        onPinPath(n.path);
+      } : undefined,
+      title: n.type === "file" && onPinPath ? "Right-click to pin/unpin for AI context" : undefined
     }, n.type === "dir" ? /*#__PURE__*/React.createElement(Icons.Chevron, {
       size: 11,
       style: {
@@ -3629,15 +3681,24 @@ function FileTree({
       style: {
         fontFamily: "var(--font-mono)",
         fontSize: 12,
-        color: isActive ? "var(--fg)" : "var(--fg-1)"
+        color: isActive ? "var(--fg)" : "var(--fg-1)",
+        flex: 1
       }
-    }, n.name)), n.type === "dir" && isOpen && n.children ? /*#__PURE__*/React.createElement(FileTree, {
+    }, n.name), isPinned ? /*#__PURE__*/React.createElement(Icons.Pin, {
+      size: 11,
+      style: {
+        color: "var(--accent)",
+        flexShrink: 0
+      }
+    }) : null), n.type === "dir" && isOpen && n.children ? /*#__PURE__*/React.createElement(FileTree, {
       nodes: n.children,
       expanded: expanded,
       active: active,
       toggle: toggle,
       onPick: onPick,
-      depth: depth + 1
+      depth: depth + 1,
+      pins: pins,
+      onPinPath: onPinPath
     }) : null);
   });
 }
@@ -3651,6 +3712,255 @@ function langColor(lang) {
     go: "oklch(62% 0.12 200)",
     text: "var(--fg-3)"
   }[lang] || "var(--fg-3)";
+}
+
+// ChatDock — the conversational AI sidebar. Per-user toggleable: when disabled
+// it collapses to a thin dormant strip (a one-click "Enable" away). When
+// enabled, it's a slide-out panel that chats against the repo, using the files
+// the user pinned in the tree as context.
+function ChatDock({
+  repoId,
+  repo,
+  pins,
+  onUnpin
+}) {
+  const [enabled, setEnabled] = React.useState(null); // null = loading
+  const [open, setOpen] = React.useState(false);
+  const [messages, setMessages] = React.useState([]); // {role, content}
+  const [chatId, setChatId] = React.useState(0);
+  const [input, setInput] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get("/v1/me/preferences").then(p => setEnabled(p.aiChat !== false)).catch(() => setEnabled(true));
+    } else {
+      setEnabled(false);
+    }
+  }, []);
+  const setPref = async on => {
+    setEnabled(on);
+    if (!on) setOpen(false);
+    try {
+      await window.OrchisAPI.patch("/v1/me/preferences", {
+        aiChat: on
+      });
+    } catch (e) {}
+  };
+  const send = async () => {
+    const text = input.trim();
+    if (!text || busy) return;
+    const next = [...messages, {
+      role: "user",
+      content: text
+    }];
+    setMessages(next);
+    setInput("");
+    setBusy(true);
+    setErr("");
+    try {
+      const res = await window.OrchisAPI.post(`/v1/repos/${repoId}/chat`, {
+        chatId,
+        messages: next,
+        pinned: pins || []
+      });
+      if (res.chatId) setChatId(res.chatId);
+      setMessages(m => [...m, {
+        role: "assistant",
+        content: res.message
+      }]);
+    } catch (e) {
+      setErr("The model call failed. Configure a model in Developer settings → Scanner.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (enabled === null) return null;
+
+  // Dormant strip — disabled, or enabled-but-closed.
+  if (!enabled || !open) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 40,
+        borderLeft: "1px solid var(--line)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        paddingTop: 12,
+        gap: 10,
+        background: "var(--bg-1)"
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost icon sm",
+      title: enabled ? "Open AI chat" : "AI chat is off",
+      onClick: () => enabled ? setOpen(true) : setPref(true),
+      style: {
+        opacity: enabled ? 1 : 0.5
+      }
+    }, /*#__PURE__*/React.createElement(Icons.Bolt, {
+      size: 14
+    })), /*#__PURE__*/React.createElement("span", {
+      style: {
+        writingMode: "vertical-rl",
+        fontSize: 10.5,
+        color: "var(--fg-3)",
+        letterSpacing: "0.04em"
+      }
+    }, enabled ? "AI chat" : "AI chat · off"), !enabled ? /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost sm",
+      style: {
+        writingMode: "vertical-rl",
+        fontSize: 10,
+        height: "auto",
+        padding: "6px 2px"
+      },
+      onClick: () => setPref(true)
+    }, "Enable") : null);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 340,
+      borderLeft: "1px solid var(--line)",
+      display: "flex",
+      flexDirection: "column",
+      background: "var(--bg-1)",
+      minHeight: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      padding: "8px 12px",
+      borderBottom: "1px solid var(--line)"
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Bolt, {
+    size: 13,
+    style: {
+      color: "var(--accent)"
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, "AI chat"), /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost icon sm",
+    title: "Turn off (collapses to a strip)",
+    onClick: () => setPref(false)
+  }, /*#__PURE__*/React.createElement(Icons.Settings, {
+    size: 12
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost icon sm",
+    title: "Collapse",
+    onClick: () => setOpen(false)
+  }, /*#__PURE__*/React.createElement(Icons.Close, {
+    size: 12
+  }))), pins && pins.length ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "6px 10px",
+      borderBottom: "1px solid var(--line)",
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 5
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "subtle",
+    style: {
+      fontSize: 10.5,
+      width: "100%",
+      marginBottom: 2
+    }
+  }, "Pinned context (", pins.length, ")"), pins.map(p => /*#__PURE__*/React.createElement("span", {
+    key: p,
+    className: "chip",
+    style: {
+      height: 18,
+      fontSize: 10,
+      gap: 4
+    }
+  }, p.split("/").pop(), /*#__PURE__*/React.createElement("span", {
+    onClick: () => onUnpin && onUnpin(p),
+    style: {
+      cursor: "pointer",
+      color: "var(--fg-3)"
+    },
+    title: "Unpin " + p
+  }, "\xD7")))) : /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      padding: "8px 12px",
+      fontSize: 11,
+      borderBottom: "1px solid var(--line)"
+    }
+  }, "Tip: right-click a file in the tree to pin it as context."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      overflowY: "auto",
+      padding: 12,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+      minHeight: 0
+    }
+  }, messages.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 12
+    }
+  }, "Ask about this repository. Pinned files are sent as context.") : null, messages.map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+      maxWidth: "92%",
+      background: m.role === "user" ? "var(--accent-soft)" : "var(--bg-2)",
+      border: "1px solid var(--line)",
+      borderRadius: 8,
+      padding: "7px 10px",
+      fontSize: 12.5,
+      lineHeight: 1.5
+    }
+  }, m.role === "assistant" ? /*#__PURE__*/React.createElement("div", {
+    className: "md-mini"
+  }, parseMd(m.content)) : m.content)), busy ? /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 12
+    }
+  }, "Thinking\u2026") : null), err ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "6px 12px",
+      fontSize: 11.5,
+      color: "var(--danger)"
+    }
+  }, err) : null, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 6,
+      padding: 10,
+      borderTop: "1px solid var(--line)"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: input,
+    onChange: e => setInput(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    },
+    placeholder: "Ask about this repo\u2026",
+    style: {
+      flex: 1
+    },
+    disabled: busy
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn primary sm",
+    onClick: send,
+    disabled: busy || !input.trim()
+  }, "Send")));
 }
 function RepoHeader({
   repo,
@@ -4329,6 +4639,12 @@ function RepoMainPanel({
       size: 12
     })
   }, "Commits"), /*#__PURE__*/React.createElement(Subtab, {
+    active: tab === "proposals",
+    onClick: () => setTab("proposals"),
+    icon: /*#__PURE__*/React.createElement(Icons.Diff, {
+      size: 12
+    })
+  }, "Proposals"), /*#__PURE__*/React.createElement(Subtab, {
     active: tab === "activity",
     onClick: () => setTab("activity"),
     icon: /*#__PURE__*/React.createElement(Icons.Activity, {
@@ -4348,10 +4664,16 @@ function RepoMainPanel({
     }
   }, tab === "code" ? /*#__PURE__*/React.createElement(CodeView, {
     repoId: repoId,
-    path: active
+    path: active,
+    repo: repo,
+    setRoute: setRoute
   }) : null, tab === "readme" ? /*#__PURE__*/React.createElement(ReadmeView, {
     repoId: repoId
   }) : null, tab === "commits" ? /*#__PURE__*/React.createElement(RepoCommitsList, {
+    repoId: repoId,
+    repo: repo,
+    setRoute: setRoute
+  }) : null, tab === "proposals" ? /*#__PURE__*/React.createElement(ProposalsView, {
     repoId: repoId,
     repo: repo,
     setRoute: setRoute
@@ -4450,6 +4772,193 @@ function RepoCommitsList({
   }, c.short)))) : null);
 }
 
+// ProposalsView — the human-in-the-loop gate. Lists AI/code change proposals;
+// a writer reviews the diff and Accepts (applies to a feature branch + opens a
+// PR) or Rejects. Nothing touches the repo until Accept is clicked.
+function ProposalsView({
+  repoId,
+  repo,
+  setRoute
+}) {
+  const [items, setItems] = React.useState(null);
+  const [open, setOpen] = React.useState(null); // expanded proposal id
+  const [busy, setBusy] = React.useState(false);
+  const [note, setNote] = React.useState("");
+  const canWrite = repo && ["owner", "admin", "write"].includes(repo.role);
+  const reload = React.useCallback(() => {
+    if (window.OrchisAPI && repoId) window.OrchisAPI.get(`/v1/repos/${repoId}/proposals`).then(setItems).catch(() => setItems([]));
+  }, [repoId]);
+  React.useEffect(() => {
+    reload();
+  }, [reload]);
+  const act = async (id, verb) => {
+    setBusy(true);
+    setNote("");
+    try {
+      const res = await window.OrchisAPI.post(`/v1/repos/${repoId}/proposals/${id}/${verb}`, {});
+      if (verb === "accept") setNote(`Accepted → committed to ${res.branch}${res.pullNumber ? `, opened PR #${res.pullNumber}` : ""}.`);else setNote("Proposal rejected.");
+      reload();
+    } catch (e) {
+      setNote(verb === "accept" ? "Accept failed — the patch may not apply cleanly." : "Reject failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const list = items || [];
+  const pill = st => ({
+    pending: "var(--accent)",
+    accepted: "var(--ok, var(--accent))",
+    rejected: "var(--fg-3)"
+  })[st] || "var(--fg-3)";
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "20px 24px",
+      maxWidth: 900
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontSize: 15,
+      fontWeight: 600,
+      margin: 0
+    }
+  }, "Change proposals"), /*#__PURE__*/React.createElement("p", {
+    className: "subtle",
+    style: {
+      fontSize: 12,
+      margin: "2px 0 0"
+    }
+  }, "AI- or tool-proposed edits. Review the diff, then Accept (applies to a new branch + opens a PR) or Reject. Nothing is applied until you accept."))), note ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "8px 12px",
+      marginBottom: 10,
+      fontSize: 12.5,
+      color: "var(--accent)"
+    }
+  }, note) : null, items == null ? /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12.5
+    }
+  }, "Loading\u2026") : null, items != null && list.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: "20px 18px",
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "No proposals yet.") : null, list.map(p => /*#__PURE__*/React.createElement("div", {
+    key: p.id,
+    className: "card",
+    style: {
+      marginBottom: 10,
+      overflow: "hidden"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOpen(open === p.id ? null : p.id),
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      width: "100%",
+      textAlign: "left",
+      padding: "11px 14px",
+      background: "transparent",
+      border: "none",
+      cursor: "pointer",
+      font: "inherit",
+      color: "inherit"
+    }
+  }, /*#__PURE__*/React.createElement(Icons.Diff, {
+    size: 14,
+    style: {
+      color: "var(--fg-2)"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      fontWeight: 450
+    }
+  }, p.title), /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5,
+      marginTop: 2
+    }
+  }, "by ", p.author && p.author.name, " \xB7 ", p.when, p.pullNumber ? ` · PR #${p.pullNumber}` : "")), /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: {
+      height: 18,
+      fontSize: 10.5,
+      color: pill(p.status),
+      borderColor: "currentColor"
+    }
+  }, p.status)), open === p.id ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      borderTop: "1px solid var(--line)"
+    }
+  }, p.summary ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "10px 14px",
+      fontSize: 12.5,
+      color: "var(--fg-2)"
+    }
+  }, p.summary) : null, /*#__PURE__*/React.createElement("pre", {
+    style: {
+      margin: 0,
+      padding: "12px 14px",
+      overflowX: "auto",
+      fontSize: 11.5,
+      lineHeight: 1.5,
+      fontFamily: "var(--font-mono)",
+      background: "var(--bg-1)",
+      maxHeight: 360
+    }
+  }, p.patch ? p.patch : (p.changes || []).map(c => c.delete ? `- delete ${c.path}\n` : `+ ${c.path}\n${c.content}\n`).join("\n")), canWrite && p.status === "pending" ? /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      padding: 12,
+      borderTop: "1px solid var(--line)"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost",
+    disabled: busy,
+    onClick: () => act(p.id, "reject")
+  }, "Reject"), /*#__PURE__*/React.createElement("button", {
+    className: "btn primary",
+    disabled: busy,
+    onClick: () => act(p.id, "accept")
+  }, busy ? "Applying…" : "Accept changes")) : p.pullNumber ? /*#__PURE__*/React.createElement("div", {
+    className: "row",
+    style: {
+      padding: 12,
+      borderTop: "1px solid var(--line)"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "spacer"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn ghost sm",
+    onClick: () => setRoute && setRoute({
+      view: "pr",
+      pr: p.pullNumber,
+      repo: repoId
+    })
+  }, "Open PR #", p.pullNumber)) : null) : null)));
+}
+
 // relativeDate renders an ISO date compactly (the API already sends UTC ISO).
 function relativeDate(iso) {
   if (!iso) return "";
@@ -4478,14 +4987,37 @@ function Subtab({
 }
 function CodeView({
   repoId,
-  path
+  path,
+  repo,
+  setRoute
 }) {
   const [blob, setBlob] = React.useState(null);
   const [err, setErr] = React.useState(false);
+  const [reload, setReload] = React.useState(0);
+  // Blame + outline + edit state.
+  const [blame, setBlame] = React.useState(null);
+  const [showBlame, setShowBlame] = React.useState(false);
+  const [outline, setOutline] = React.useState(null);
+  const [showOutline, setShowOutline] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState("");
+  const [msg, setMsg] = React.useState("");
+  const [toNew, setToNew] = React.useState(false);
+  const [newBranch, setNewBranch] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [note, setNote] = React.useState("");
+  const canWrite = repo && ["owner", "admin", "write"].includes(repo.role);
+  const defBranch = repo && repo.defaultBranch || "main";
   React.useEffect(() => {
     let cancelled = false;
     setBlob(null);
     setErr(false);
+    setBlame(null);
+    setShowBlame(false);
+    setOutline(null);
+    setShowOutline(false);
+    setEditing(false);
+    setNote("");
     if (window.OrchisAPI && repoId && path && path !== "README.md") {
       window.OrchisAPI.get(`/v1/repos/${repoId}/blob?path=${encodeURIComponent(path)}`).then(b => {
         if (!cancelled) setBlob(b);
@@ -4496,7 +5028,56 @@ function CodeView({
     return () => {
       cancelled = true;
     };
-  }, [repoId, path]);
+  }, [repoId, path, reload]);
+  const toggleBlame = () => {
+    if (!showBlame && blame == null && window.OrchisAPI) {
+      window.OrchisAPI.get(`/v1/repos/${repoId}/blame?path=${encodeURIComponent(path)}`).then(setBlame).catch(() => setBlame([]));
+    }
+    setShowBlame(v => !v);
+    setShowOutline(false);
+  };
+  const toggleOutline = () => {
+    if (!showOutline && outline == null && window.OrchisAPI) {
+      window.OrchisAPI.get(`/v1/repos/${repoId}/outline?path=${encodeURIComponent(path)}`).then(setOutline).catch(() => setOutline([]));
+    }
+    setShowOutline(v => !v);
+    setShowBlame(false);
+  };
+  const startEdit = () => {
+    setDraft(blob ? blob.content : "");
+    setMsg("Update " + path);
+    setToNew(false);
+    setNewBranch("");
+    setNote("");
+    setShowBlame(false);
+    setEditing(true);
+  };
+  const commit = async () => {
+    setBusy(true);
+    setNote("");
+    const branch = toNew ? newBranch.trim() : defBranch;
+    try {
+      const res = await window.OrchisAPI.post(`/v1/repos/${repoId}/commits`, {
+        branch,
+        message: msg,
+        changes: [{
+          path,
+          content: draft
+        }]
+      });
+      setEditing(false);
+      setNote(`Committed ${res.sha ? res.sha.slice(0, 7) : ""} to ${res.branch}.`);
+      if (toNew) {
+        // Don't silently change what the viewer sees; just confirm the branch.
+      } else {
+        setReload(n => n + 1); // refresh the blob on the same branch
+      }
+    } catch (e) {
+      setNote("Commit failed — you may lack write access, or the branch moved.");
+    } finally {
+      setBusy(false);
+    }
+  };
   if (path === "README.md") return /*#__PURE__*/React.createElement(ReadmeView, {
     repoId: repoId
   });
@@ -4539,16 +5120,161 @@ function CodeView({
       }
     }, path), /*#__PURE__*/React.createElement("span", {
       className: "spacer"
-    }), /*#__PURE__*/React.createElement("span", {
+    }), !editing ? /*#__PURE__*/React.createElement("span", {
       className: "muted",
       style: {
         fontSize: 11.5
       }
-    }, blob.lines, " lines \xB7 ", fmtBytes(blob.size), " \xB7 ", blob.lang), /*#__PURE__*/React.createElement("button", {
-      className: "btn ghost sm icon"
-    }, /*#__PURE__*/React.createElement(Icons.Copy, {
+    }, blob.lines, " lines \xB7 ", fmtBytes(blob.size), " \xB7 ", blob.lang) : null, !editing ? /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost sm" + (showBlame ? " active" : ""),
+      onClick: toggleBlame,
+      title: "Toggle blame"
+    }, /*#__PURE__*/React.createElement(Icons.Activity, {
       size: 12
-    }))), /*#__PURE__*/React.createElement(CodeBlock, {
+    }), " Blame") : null, !editing && window.OrchisAPI ? /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost sm" + (showOutline ? " active" : ""),
+      onClick: toggleOutline,
+      title: "Show symbol outline"
+    }, /*#__PURE__*/React.createElement(Icons.Code, {
+      size: 12
+    }), " Outline") : null, canWrite && !editing ? /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost sm",
+      onClick: startEdit,
+      title: "Edit this file"
+    }, /*#__PURE__*/React.createElement(Icons.Edit, {
+      size: 12
+    }), " Edit") : null), note ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: "8px 14px",
+        fontSize: 12,
+        color: "var(--accent)",
+        borderBottom: "1px solid var(--line)"
+      }
+    }, note) : null, editing ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
+        flex: 1
+      }
+    }, /*#__PURE__*/React.createElement("textarea", {
+      value: draft,
+      onChange: e => setDraft(e.target.value),
+      spellCheck: false,
+      style: {
+        flex: 1,
+        minHeight: 300,
+        resize: "vertical",
+        border: "none",
+        outline: "none",
+        padding: "12px 16px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 12.5,
+        lineHeight: 1.6,
+        background: "var(--bg-1)",
+        color: "var(--fg)"
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        borderTop: "1px solid var(--line)",
+        padding: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "row",
+      style: {
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      className: "input",
+      value: msg,
+      onChange: e => setMsg(e.target.value),
+      placeholder: "Commit message",
+      style: {
+        flex: 1
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost sm",
+      disabled: busy,
+      title: "Draft a Conventional Commit message with your model",
+      onClick: async () => {
+        try {
+          const res = await window.OrchisAPI.post(`/v1/repos/${repoId}/commits/draft-message`, {
+            changes: [{
+              path,
+              content: draft
+            }]
+          });
+          if (res && res.message) setMsg(res.message);
+        } catch (e) {
+          setNote("Couldn't draft a message — is a model configured in Developer settings?");
+        }
+      }
+    }, /*#__PURE__*/React.createElement(Icons.Bolt, {
+      size: 12
+    }), " Generate")), /*#__PURE__*/React.createElement("div", {
+      className: "row",
+      style: {
+        gap: 12,
+        fontSize: 12.5,
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("label", {
+      className: "row",
+      style: {
+        gap: 6,
+        cursor: "pointer"
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "radio",
+      checked: !toNew,
+      onChange: () => setToNew(false)
+    }), " Commit to ", /*#__PURE__*/React.createElement("span", {
+      className: "mono"
+    }, defBranch)), /*#__PURE__*/React.createElement("label", {
+      className: "row",
+      style: {
+        gap: 6,
+        cursor: "pointer"
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "radio",
+      checked: toNew,
+      onChange: () => setToNew(true)
+    }), " New branch"), toNew ? /*#__PURE__*/React.createElement("input", {
+      className: "input",
+      value: newBranch,
+      onChange: e => setNewBranch(e.target.value),
+      placeholder: "feature/my-edit",
+      style: {
+        flex: 1,
+        minWidth: 160
+      }
+    }) : null), /*#__PURE__*/React.createElement("div", {
+      className: "row",
+      style: {
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "spacer"
+    }), /*#__PURE__*/React.createElement("button", {
+      className: "btn ghost",
+      onClick: () => setEditing(false),
+      disabled: busy
+    }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+      className: "btn primary",
+      onClick: commit,
+      disabled: busy || !msg.trim() || toNew && !newBranch.trim()
+    }, busy ? "Committing…" : "Commit changes")))) : showBlame && blame ? /*#__PURE__*/React.createElement(BlameBlock, {
+      code: blob.content,
+      blame: blame,
+      repoId: repoId,
+      setRoute: setRoute
+    }) : showOutline && outline ? /*#__PURE__*/React.createElement(OutlineList, {
+      symbols: outline
+    }) : /*#__PURE__*/React.createElement(CodeBlock, {
       code: blob.content
     }));
   }
@@ -4570,6 +5296,121 @@ function CodeView({
       height: 220
     }
   }, err ? `[ could not load ${path} ]` : `[ loading ${path}… ]`));
+}
+
+// OutlineList renders a file's structural symbols (AST-aware chunking). Lets a
+// reader (or the LLM, via the same endpoint) scan names before whole bodies.
+function OutlineList({
+  symbols
+}) {
+  const kindColor = {
+    func: "var(--accent)",
+    method: "var(--accent)",
+    class: "oklch(64% 0.12 30)",
+    struct: "oklch(64% 0.12 30)",
+    enum: "oklch(64% 0.12 30)",
+    interface: "oklch(60% 0.12 280)",
+    type: "oklch(60% 0.12 280)"
+  };
+  if (!symbols.length) return /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      padding: 20,
+      fontSize: 12.5
+    }
+  }, "No symbols detected (or unsupported language).");
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "10px 4px"
+    }
+  }, symbols.map((s, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "row",
+    style: {
+      gap: 10,
+      padding: "6px 16px",
+      fontSize: 12.5
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "chip",
+    style: {
+      height: 17,
+      fontSize: 9.5,
+      color: kindColor[s.kind] || "var(--fg-3)",
+      borderColor: "currentColor",
+      minWidth: 52,
+      justifyContent: "center"
+    }
+  }, s.kind), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      flex: 1
+    }
+  }, s.name), /*#__PURE__*/React.createElement("span", {
+    className: "subtle",
+    style: {
+      fontSize: 11
+    }
+  }, "L", s.lineStart, s.lineEnd > s.lineStart ? `–${s.lineEnd}` : ""))));
+}
+
+// BlameBlock renders the file with a per-line authorship gutter. Clicking a
+// line's sha opens that commit.
+function BlameBlock({
+  code,
+  blame,
+  repoId,
+  setRoute
+}) {
+  const lines = code.split("\n");
+  const by = {};
+  blame.forEach(b => {
+    by[b.line] = b;
+  });
+  return /*#__PURE__*/React.createElement("pre", {
+    style: repoStyles.pre
+  }, lines.map((ln, i) => {
+    const b = by[i + 1];
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: repoStyles.codeLine
+    }, /*#__PURE__*/React.createElement("span", {
+      onClick: () => b && setRoute && setRoute({
+        view: "commit",
+        repo: repoId,
+        sha: b.sha
+      }),
+      title: b ? `${b.summary} — ${b.author}, ${b.when}` : "",
+      style: {
+        display: "inline-block",
+        width: 168,
+        flexShrink: 0,
+        paddingRight: 10,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        color: "var(--fg-3)",
+        fontSize: 10.5,
+        cursor: b ? "pointer" : "default",
+        borderRight: "1px solid var(--line)"
+      }
+    }, b ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+      className: "mono",
+      style: {
+        color: "var(--accent)"
+      }
+    }, b.short), " ", b.author, " \xB7 ", b.when) : ""), /*#__PURE__*/React.createElement("span", {
+      style: {
+        ...repoStyles.lineNo,
+        width: 40
+      }
+    }, i + 1), /*#__PURE__*/React.createElement("code", {
+      style: {
+        whiteSpace: "pre",
+        fontFamily: "var(--font-mono)"
+      }
+    }, highlightRust(ln)));
+  }));
 }
 function fmtBytes(n) {
   if (n == null) return "";
@@ -8835,7 +9676,10 @@ function ScannerPanel() {
         baseUrl: "",
         model: "",
         hasKey: false,
-        apiKey: ""
+        apiKey: "",
+        contextBudget: 8000,
+        maxOutputTokens: 2048,
+        pruneGlobs: ""
       }));
     } else {
       setCfg({
@@ -8844,7 +9688,10 @@ function ScannerPanel() {
         baseUrl: "",
         model: "",
         hasKey: false,
-        apiKey: ""
+        apiKey: "",
+        contextBudget: 8000,
+        maxOutputTokens: 2048,
+        pruneGlobs: ""
       });
     }
   }, []);
@@ -8869,7 +9716,10 @@ function ScannerPanel() {
         enabled: cfg.enabled,
         provider: cfg.provider,
         baseUrl: cfg.baseUrl,
-        model: cfg.model
+        model: cfg.model,
+        contextBudget: Number(cfg.contextBudget) || 8000,
+        maxOutputTokens: Number(cfg.maxOutputTokens) || 2048,
+        pruneGlobs: cfg.pruneGlobs || ""
       };
       if (cfg.apiKey) body.apiKey = cfg.apiKey;
       const res = await window.OrchisAPI.put("/v1/me/scanner", body);
@@ -8972,6 +9822,59 @@ function ScannerPanel() {
     placeholder: cfg.hasKey ? "•••••••• (saved)" : "",
     autoComplete: "off"
   })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      borderTop: "1px solid var(--line)",
+      paddingTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "section-title",
+    style: {
+      marginBottom: 4
+    }
+  }, "Context budget"), /*#__PURE__*/React.createElement("p", {
+    className: "subtle",
+    style: {
+      fontSize: 11.5,
+      margin: "0 0 10px"
+    }
+  }, "Cap how much context is fed to the model \u2014 protects local VRAM and cloud cost. Pruning strips dependencies, build output, and lockfiles before anything reaches the model."), /*#__PURE__*/React.createElement(Field, {
+    label: `Input budget — ~${Number(cfg.contextBudget).toLocaleString()} tokens`,
+    hint: "Approximate cap on context sent per request (1k\u2013200k)."
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "range",
+    min: "1000",
+    max: "64000",
+    step: "1000",
+    value: cfg.contextBudget,
+    onChange: e => set("contextBudget", e.target.value),
+    style: {
+      width: "100%"
+    }
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Max output tokens",
+    hint: "Generation cap passed to the provider (256\u201332000)."
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: "256",
+    max: "32000",
+    step: "256",
+    value: cfg.maxOutputTokens,
+    onChange: e => set("maxOutputTokens", e.target.value)
+  })), /*#__PURE__*/React.createElement(Field, {
+    label: "Extra prune globs",
+    hint: "Newline- or comma-separated path globs to also exclude, e.g. *.snap, generated/*, *.pb.go"
+  }, /*#__PURE__*/React.createElement("textarea", {
+    className: "input",
+    rows: 2,
+    value: cfg.pruneGlobs,
+    onChange: e => set("pruneGlobs", e.target.value),
+    placeholder: "*.snap, generated/*",
+    style: {
+      resize: "vertical",
+      fontFamily: "var(--font-mono)"
+    }
+  }))), /*#__PURE__*/React.createElement("div", {
     className: "row"
   }, /*#__PURE__*/React.createElement("span", {
     className: "subtle",

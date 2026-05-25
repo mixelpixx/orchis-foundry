@@ -40,6 +40,7 @@ const Icons = {
   Bell: (p) => <Icon {...p} d={<><path d="M3.5 11.5L4 10V7a4 4 0 0 1 8 0v3l.5 1.5z"/><path d="M6.5 13a1.5 1.5 0 0 0 3 0"/></>} />,
   Filter: (p) => <Icon {...p} d="M2 3.5h12l-4.5 6V14L6.5 12V9.5z" />,
   Diff: (p) => <Icon {...p} d={<><path d="M4 2v10M2 4h4M11 4v8M9 12h4"/></>} />,
+  Edit: (p) => <Icon {...p} d={<><path d="M10.5 2.5l3 3L6 13l-3.5 1 1-3.5z"/><path d="M9 4l3 3"/></>} />,
   Pin: (p) => <Icon {...p} d="M10 2l4 4-1.5 1.5-1-1L8 10.5l-2 .5-1 3 3-1 .5-2L11.5 7l-1-1z" />,
   Tag: (p) => <Icon {...p} d={<><path d="M2 2.5h5L14 9.5a1.5 1.5 0 0 1 0 2L11.5 14a1.5 1.5 0 0 1-2 0L2.5 7z"/><circle cx="5" cy="5" r="0.8" fill="currentColor"/></>} />,
 };

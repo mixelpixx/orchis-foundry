@@ -22,6 +22,11 @@ func (s *Server) handleLLMsTxt(w http.ResponseWriter, r *http.Request) {
 		"- `GET /v1/repos/{owner}/{repo}/pack?ref=&maxBytes=` — the whole repo as one markdown document, ready to paste into a model.\n" +
 		"- `GET /v1/repos/{owner}/{repo}/pulls/{num}/pack` — a pull request (description + commits + diff + comments) as one document.\n" +
 		"- `GET /v1/repos/{owner}/{repo}/tree?ref=&path=`, `/blob?path=`, `/raw?path=`, `/readme` — structured read access.\n\n" +
+		"## Writing code\n\n" +
+		"- `POST /v1/repos/{owner}/{repo}/commits {branch, baseSha?, message, changes:[{path, content|delete}]}` commits edits (needs write access).\n" +
+		"- `GET /v1/repos/{owner}/{repo}/blame?ref=&path=` returns per-line authorship; `GET .../outline?ref=&path=` returns structural symbols.\n" +
+		"- AI-proposed changes go through a human gate: `POST .../proposals {title, patch}` then a reviewer accepts via `POST .../proposals/{id}/accept`.\n" +
+		"- `POST .../commits/draft-message` generates a Conventional-Commits message from a diff.\n\n" +
 		"## Working with a PR\n\n" +
 		"- List: `GET /v1/repos/{owner}/{repo}/pulls?state=open` ; detail: `.../pulls/{num}` ; diff: `.../pulls/{num}/files`.\n" +
 		"- Open: `POST /v1/repos/{owner}/{repo}/pulls {title,head,base,body}`.\n" +

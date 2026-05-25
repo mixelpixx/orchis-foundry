@@ -22,6 +22,30 @@ type Settings struct {
 	BaseURL  string
 	Model    string
 	APIKey   string
+
+	// LLM context controls (see migration 0013). ContextBudget is the
+	// approximate input-token cap; MaxOutputTokens caps generation. Zero means
+	// "use the built-in default".
+	ContextBudget   int
+	MaxOutputTokens int
+	PruneGlobs      string
+}
+
+// OutputTokens returns the configured generation cap, or a sane default.
+func (s Settings) OutputTokens() int {
+	if s.MaxOutputTokens > 0 {
+		return s.MaxOutputTokens
+	}
+	return 2048
+}
+
+// InputBudgetBytes converts the token budget into an approximate byte cap
+// (~4 bytes/token) for truncating prompts. Falls back to maxDiffBytes.
+func (s Settings) InputBudgetBytes() int {
+	if s.ContextBudget > 0 {
+		return s.ContextBudget * 4
+	}
+	return maxDiffBytes
 }
 
 // Finding is one structured result line.
@@ -72,8 +96,8 @@ func Chat(ctx context.Context, s Settings, system, user string) (string, error) 
 // Run executes a supply-chain scan against the configured provider and returns
 // the parsed result.
 func Run(ctx context.Context, s Settings, diff string) (*Result, error) {
-	if len(diff) > maxDiffBytes {
-		diff = diff[:maxDiffBytes] + "\n\n[diff truncated for scanning]\n"
+	if budget := s.InputBudgetBytes(); len(diff) > budget {
+		diff = diff[:budget] + "\n\n[diff truncated for scanning]\n"
 	}
 	raw, err := Chat(ctx, s, systemPrompt, "<diff>\n"+diff+"\n</diff>")
 	if err != nil {
@@ -111,7 +135,7 @@ func runAnthropic(ctx context.Context, s Settings, system, user string) (string,
 	}
 	body := map[string]any{
 		"model":      model,
-		"max_tokens": 2048,
+		"max_tokens": s.OutputTokens(),
 		"system":     system,
 		"messages":   []map[string]any{{"role": "user", "content": user}},
 	}
@@ -160,6 +184,7 @@ func runOpenAICompatible(ctx context.Context, s Settings, system, user string) (
 		"messages":    []map[string]any{{"role": "system", "content": system}, {"role": "user", "content": user}},
 		"temperature": 0,
 		"stream":      false,
+		"max_tokens":  s.OutputTokens(),
 	}
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(b))

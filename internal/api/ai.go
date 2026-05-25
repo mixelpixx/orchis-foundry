@@ -16,8 +16,12 @@ import (
 
 const aiMaxDiffBytes = 120 * 1024
 
-// renderDiff turns parsed FileDiffs back into a unified-diff string for prompts.
-func renderDiff(diffs []gitstore.FileDiff) string {
+// renderDiff turns parsed FileDiffs back into a unified-diff string for prompts,
+// truncated to maxBytes (0 = the default cap).
+func renderDiff(diffs []gitstore.FileDiff, maxBytes int) string {
+	if maxBytes <= 0 {
+		maxBytes = aiMaxDiffBytes
+	}
 	var b strings.Builder
 	for _, fd := range diffs {
 		b.WriteString("diff --git a/" + fd.Path + " b/" + fd.Path + "\n")
@@ -35,8 +39,8 @@ func renderDiff(diffs []gitstore.FileDiff) string {
 		}
 	}
 	out := b.String()
-	if len(out) > aiMaxDiffBytes {
-		out = out[:aiMaxDiffBytes] + "\n\n[diff truncated]\n"
+	if len(out) > maxBytes {
+		out = out[:maxBytes] + "\n\n[diff truncated]\n"
 	}
 	return out
 }
@@ -65,7 +69,7 @@ func (s *Server) aiPrep(w http.ResponseWriter, r *http.Request) (st scan.Setting
 	s.db.QueryRowContext(r.Context(), `SELECT title, body, base_sha, head_sha FROM pulls WHERE id = ?`, pullID).
 		Scan(&title, &body, &baseSHA, &headSHA)
 	diffs, _ := s.git.Diff(row.ID, baseSHA, headSHA)
-	return settings, title, body, renderDiff(diffs), true
+	return settings, title, body, renderDiff(diffs, settings.InputBudgetBytes()), true
 }
 
 func runChat(ctx context.Context, st scan.Settings, system, user string) (string, int, string) {

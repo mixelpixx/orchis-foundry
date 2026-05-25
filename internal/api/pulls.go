@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -231,46 +233,55 @@ func (s *Server) handleCreatePull(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title and head branch are required")
 		return
 	}
-	if in.Base == "" {
-		in.Base = row.DefaultBranch
-	}
-
-	headSHA, err := s.git.RevParse(row.ID, in.Head)
+	id, _, err := s.createPull(r.Context(), row, u.ID, u.Handle, in.Title, in.Body, in.Head, in.Base)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "head branch not found: "+in.Head)
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	baseSHA, err := s.git.MergeBase(row.ID, in.Base, in.Head)
-	if err != nil || baseSHA == "" {
-		baseSHA, _ = s.git.RevParse(row.ID, in.Base)
-	}
+	writeJSON(w, http.StatusOK, s.pullSummary(r, id))
+}
 
+// createPull inserts a pull request and fires the usual side effects (scan
+// enqueue, activity, webhook). Shared by the HTTP create handler and the AI
+// change-proposal accept flow. base="" defaults to the repo's default branch.
+func (s *Server) createPull(ctx context.Context, row *repoRow, authorID int64, authorHandle, title, body, head, base string) (pullID int64, number int, err error) {
+	if title == "" || head == "" {
+		return 0, 0, fmt.Errorf("title and head branch are required")
+	}
+	if base == "" {
+		base = row.DefaultBranch
+	}
+	headSHA, e := s.git.RevParse(row.ID, head)
+	if e != nil {
+		return 0, 0, fmt.Errorf("head branch not found: %s", head)
+	}
+	baseSHA, e := s.git.MergeBase(row.ID, base, head)
+	if e != nil || baseSHA == "" {
+		baseSHA, _ = s.git.RevParse(row.ID, base)
+	}
 	adds, dels, files := s.git.DiffStat(row.ID, baseSHA, headSHA)
 	commits := s.git.CountCommits(row.ID, baseSHA, headSHA)
 
-	var number int
-	s.db.QueryRowContext(r.Context(), `SELECT COALESCE(MAX(number),0)+1 FROM pulls WHERE repo_id = ?`, row.ID).Scan(&number)
-
-	res, err := s.db.ExecContext(r.Context(),
+	s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(number),0)+1 FROM pulls WHERE repo_id = ?`, row.ID).Scan(&number)
+	res, e := s.db.ExecContext(ctx,
 		`INSERT INTO pulls (repo_id, number, title, body, author_id, head_branch, base_branch, head_sha, base_sha, additions, deletions, files_count, commits_count)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		row.ID, number, in.Title, in.Body, u.ID, in.Head, in.Base, headSHA, baseSHA, adds, dels, files, commits)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not create pull request")
-		return
+		row.ID, number, title, body, authorID, head, base, headSHA, baseSHA, adds, dels, files, commits)
+	if e != nil {
+		return 0, 0, fmt.Errorf("could not create pull request")
 	}
-	id, _ := res.LastInsertId()
+	pullID, _ = res.LastInsertId()
 	if s.scan != nil {
-		s.scan.Enqueue(id, row.ID, headSHA)
+		s.scan.Enqueue(pullID, row.ID, headSHA)
 	}
-	s.logActivity(r.Context(), u.ID, "pr_opened", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(number), in.Title)
+	s.logActivity(ctx, authorID, "pr_opened", row.ID, row.OwnerHandle+"/"+row.Name+"#"+strconv.Itoa(number), title)
 	if s.webhooks != nil {
-		s.webhooks.Fire(r.Context(), row.ID, "pull_request", map[string]any{
+		s.webhooks.Fire(ctx, row.ID, "pull_request", map[string]any{
 			"event": "pull_request", "action": "opened", "repo": row.OwnerHandle + "/" + row.Name,
-			"number": number, "title": in.Title, "head": in.Head, "base": in.Base, "author": u.Handle,
+			"number": number, "title": title, "head": head, "base": base, "author": authorHandle,
 		})
 	}
-	writeJSON(w, http.StatusOK, s.pullSummary(r, id))
+	return pullID, number, nil
 }
 
 func (s *Server) handleGetPull(w http.ResponseWriter, r *http.Request) {

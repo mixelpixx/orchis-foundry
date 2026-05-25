@@ -54,8 +54,24 @@ func (s *Server) handleRepoPack(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nodes, _ := s.git.Tree(row.ID, ref)
-	var files []string
-	flattenFiles(nodes, &files)
+	var all []string
+	flattenFiles(nodes, &all)
+
+	// Context-pruning: strip dependencies, build output, lockfiles, and the
+	// owner's custom globs so the pack stays signal-dense for the LLM.
+	var extraGlobs []string
+	if st, ok := s.modelSettings(r.Context(), row.OwnerUserID.Int64); ok {
+		extraGlobs = parsePruneGlobs(st.PruneGlobs)
+	}
+	files := make([]string, 0, len(all))
+	var pruned []string
+	for _, f := range all {
+		if shouldPrune(f, extraGlobs) {
+			pruned = append(pruned, f)
+			continue
+		}
+		files = append(files, f)
+	}
 
 	var b strings.Builder
 	b.WriteString("# Repository: " + row.OwnerHandle + "/" + row.Name + "\n\n")
@@ -92,6 +108,9 @@ func (s *Server) handleRepoPack(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(skipped) > 0 {
 		b.WriteString("## Skipped (binary or oversized)\n\n```\n" + strings.Join(skipped, "\n") + "\n```\n")
+	}
+	if len(pruned) > 0 {
+		b.WriteString("## Pruned (dependencies / build output / lockfiles)\n\n```\n" + strings.Join(pruned, "\n") + "\n```\n")
 	}
 	if truncated {
 		b.WriteString("\n_[pack truncated at " + strconv.Itoa(maxBytes) + " bytes — raise maxBytes for more]_\n")
@@ -141,7 +160,7 @@ func (s *Server) handlePRPack(w http.ResponseWriter, r *http.Request) {
 
 	diffs, _ := s.git.Diff(row.ID, baseSHA, headSHA)
 	b.WriteString("## Diff\n\n```diff\n")
-	b.WriteString(renderDiff(diffs))
+	b.WriteString(renderDiff(diffs, 0))
 	b.WriteString("```\n\n")
 
 	// Existing comments.

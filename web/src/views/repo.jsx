@@ -7,6 +7,17 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
   const [treeWidth, setTreeWidth] = React.useState(260);
   const [mainSplit, setMainSplit] = React.useState(0.55);
 
+  // Files the user pinned into LLM context (persisted per-repo in localStorage).
+  const [pins, setPins] = React.useState(() => loadPins(repoId));
+  React.useEffect(() => { setPins(loadPins(repoId)); }, [repoId]);
+  const togglePinFile = React.useCallback((path) => {
+    setPins(prev => {
+      const next = prev.includes(path) ? prev.filter(x => x !== path) : [...prev, path];
+      savePins(repoId, next);
+      return next;
+    });
+  }, [repoId]);
+
   // Live file tree for this repo (falls back to the mock when offline).
   const [tree, setTree] = React.useState(null);
   React.useEffect(() => {
@@ -113,7 +124,7 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
           <div style={repoStyles.treeScroll}>
             {treeNodes.length === 0
               ? <div style={{ padding: "16px 12px", color: "var(--fg-3)", fontSize: 12 }}>Empty repository. Push some code to get started.</div>
-              : <FileTree nodes={treeNodes} expanded={expanded} active={active} toggle={toggle} onPick={onPickFile} depth={0} />}
+              : <FileTree nodes={treeNodes} expanded={expanded} active={active} toggle={toggle} onPick={onPickFile} depth={0} pins={pins} onPinPath={togglePinFile} />}
           </div>
         </div>
 
@@ -134,13 +145,26 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
             </>
           ) : (
             <div style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <RepoMainPanel repo={repo} repoId={repoId} active={active} tab={tab} setTab={setTab} setActive={onPickFile} />
+              <RepoMainPanel repo={repo} repoId={repoId} active={active} tab={tab} setTab={setTab} setActive={onPickFile} setRoute={setRoute} />
             </div>
           )}
         </div>
+
+        {/* AI chat sidebar — toggleable; dormant strip when disabled. */}
+        <ChatDock repoId={repoId} repo={repo} pins={pins} onUnpin={togglePinFile} />
       </div>
     </div>
   );
+}
+
+// Pin persistence — per-repo, client-side (localStorage). Survives reloads;
+// sent with every chat request so pinned files stay in the model's context.
+function loadPins(repoId) {
+  try { return JSON.parse(localStorage.getItem("orchis:pins:" + repoId) || "[]"); }
+  catch (e) { return []; }
+}
+function savePins(repoId, pins) {
+  try { localStorage.setItem("orchis:pins:" + repoId, JSON.stringify(pins)); } catch (e) {}
 }
 
 function collectInitialExpanded(nodes, acc = {}) {
@@ -153,10 +177,12 @@ function collectInitialExpanded(nodes, acc = {}) {
   return acc;
 }
 
-function FileTree({ nodes, expanded, active, toggle, onPick, depth }) {
+function FileTree({ nodes, expanded, active, toggle, onPick, depth, pins, onPinPath }) {
+  const pinned = pins || [];
   return nodes.map(n => {
     const isOpen = expanded[n.path];
     const isActive = n.type === "file" && active === n.path;
+    const isPinned = pinned.includes(n.path);
     return (
       <React.Fragment key={n.path}>
         <button
@@ -166,6 +192,8 @@ function FileTree({ nodes, expanded, active, toggle, onPick, depth }) {
             paddingLeft: 6 + depth * 14,
           }}
           onClick={() => n.type === "dir" ? toggle(n.path) : onPick(n)}
+          onContextMenu={onPinPath && n.type === "file" ? (e) => { e.preventDefault(); onPinPath(n.path); } : undefined}
+          title={n.type === "file" && onPinPath ? "Right-click to pin/unpin for AI context" : undefined}
         >
           {n.type === "dir"
             ? <Icons.Chevron size={11} style={{ color: "var(--fg-3)", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 80ms" }} />
@@ -175,10 +203,11 @@ function FileTree({ nodes, expanded, active, toggle, onPick, depth }) {
             ? <Icons.Folder size={13} style={{ color: "var(--fg-2)" }} />
             : <span style={{ ...repoStyles.fileGlyph, background: langColor(n.lang) }} />
           }
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: isActive ? "var(--fg)" : "var(--fg-1)" }}>{n.name}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: isActive ? "var(--fg)" : "var(--fg-1)", flex: 1 }}>{n.name}</span>
+          {isPinned ? <Icons.Pin size={11} style={{ color: "var(--accent)", flexShrink: 0 }} /> : null}
         </button>
         {n.type === "dir" && isOpen && n.children
-          ? <FileTree nodes={n.children} expanded={expanded} active={active} toggle={toggle} onPick={onPick} depth={depth + 1} />
+          ? <FileTree nodes={n.children} expanded={expanded} active={active} toggle={toggle} onPick={onPick} depth={depth + 1} pins={pins} onPinPath={onPinPath} />
           : null}
       </React.Fragment>
     );
@@ -195,6 +224,116 @@ function langColor(lang) {
     go: "oklch(62% 0.12 200)",
     text: "var(--fg-3)",
   }[lang] || "var(--fg-3)";
+}
+
+// ChatDock — the conversational AI sidebar. Per-user toggleable: when disabled
+// it collapses to a thin dormant strip (a one-click "Enable" away). When
+// enabled, it's a slide-out panel that chats against the repo, using the files
+// the user pinned in the tree as context.
+function ChatDock({ repoId, repo, pins, onUnpin }) {
+  const [enabled, setEnabled] = React.useState(null);   // null = loading
+  const [open, setOpen] = React.useState(false);
+  const [messages, setMessages] = React.useState([]);   // {role, content}
+  const [chatId, setChatId] = React.useState(0);
+  const [input, setInput] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get("/v1/me/preferences")
+        .then(p => setEnabled(p.aiChat !== false))
+        .catch(() => setEnabled(true));
+    } else { setEnabled(false); }
+  }, []);
+
+  const setPref = async (on) => {
+    setEnabled(on);
+    if (!on) setOpen(false);
+    try { await window.OrchisAPI.patch("/v1/me/preferences", { aiChat: on }); } catch (e) {}
+  };
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || busy) return;
+    const next = [...messages, { role: "user", content: text }];
+    setMessages(next); setInput(""); setBusy(true); setErr("");
+    try {
+      const res = await window.OrchisAPI.post(`/v1/repos/${repoId}/chat`, { chatId, messages: next, pinned: pins || [] });
+      if (res.chatId) setChatId(res.chatId);
+      setMessages(m => [...m, { role: "assistant", content: res.message }]);
+    } catch (e) {
+      setErr("The model call failed. Configure a model in Developer settings → Scanner.");
+    } finally { setBusy(false); }
+  };
+
+  if (enabled === null) return null;
+
+  // Dormant strip — disabled, or enabled-but-closed.
+  if (!enabled || !open) {
+    return (
+      <div style={{ width: 40, borderLeft: "1px solid var(--line)", display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 12, gap: 10, background: "var(--bg-1)" }}>
+        <button className="btn ghost icon sm" title={enabled ? "Open AI chat" : "AI chat is off"}
+          onClick={() => enabled ? setOpen(true) : setPref(true)} style={{ opacity: enabled ? 1 : 0.5 }}>
+          <Icons.Bolt size={14} />
+        </button>
+        <span style={{ writingMode: "vertical-rl", fontSize: 10.5, color: "var(--fg-3)", letterSpacing: "0.04em" }}>
+          {enabled ? "AI chat" : "AI chat · off"}
+        </span>
+        {!enabled ? (
+          <button className="btn ghost sm" style={{ writingMode: "vertical-rl", fontSize: 10, height: "auto", padding: "6px 2px" }} onClick={() => setPref(true)}>Enable</button>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ width: 340, borderLeft: "1px solid var(--line)", display: "flex", flexDirection: "column", background: "var(--bg-1)", minHeight: 0 }}>
+      <div className="row" style={{ gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--line)" }}>
+        <Icons.Bolt size={13} style={{ color: "var(--accent)" }} />
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>AI chat</span>
+        <span className="spacer" />
+        <button className="btn ghost icon sm" title="Turn off (collapses to a strip)" onClick={() => setPref(false)}><Icons.Settings size={12} /></button>
+        <button className="btn ghost icon sm" title="Collapse" onClick={() => setOpen(false)}><Icons.Close size={12} /></button>
+      </div>
+
+      {pins && pins.length ? (
+        <div style={{ padding: "6px 10px", borderBottom: "1px solid var(--line)", display: "flex", flexWrap: "wrap", gap: 5 }}>
+          <span className="subtle" style={{ fontSize: 10.5, width: "100%", marginBottom: 2 }}>Pinned context ({pins.length})</span>
+          {pins.map(p => (
+            <span key={p} className="chip" style={{ height: 18, fontSize: 10, gap: 4 }}>
+              {p.split("/").pop()}
+              <span onClick={() => onUnpin && onUnpin(p)} style={{ cursor: "pointer", color: "var(--fg-3)" }} title={"Unpin " + p}>×</span>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className="subtle" style={{ padding: "8px 12px", fontSize: 11, borderBottom: "1px solid var(--line)" }}>
+          Tip: right-click a file in the tree to pin it as context.
+        </div>
+      )}
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
+        {messages.length === 0 ? <div className="subtle" style={{ fontSize: 12 }}>Ask about this repository. Pinned files are sent as context.</div> : null}
+        {messages.map((m, i) => (
+          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "92%",
+            background: m.role === "user" ? "var(--accent-soft)" : "var(--bg-2)", border: "1px solid var(--line)",
+            borderRadius: 8, padding: "7px 10px", fontSize: 12.5, lineHeight: 1.5 }}>
+            {m.role === "assistant" ? <div className="md-mini">{parseMd(m.content)}</div> : m.content}
+          </div>
+        ))}
+        {busy ? <div className="subtle" style={{ fontSize: 12 }}>Thinking…</div> : null}
+      </div>
+
+      {err ? <div style={{ padding: "6px 12px", fontSize: 11.5, color: "var(--danger)" }}>{err}</div> : null}
+      <div className="row" style={{ gap: 6, padding: 10, borderTop: "1px solid var(--line)" }}>
+        <input className="input" value={input} onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Ask about this repo…" style={{ flex: 1 }} disabled={busy} />
+        <button className="btn primary sm" onClick={send} disabled={busy || !input.trim()}>Send</button>
+      </div>
+    </div>
+  );
 }
 
 function RepoHeader({ repo, setRoute, openSplit, isOwner, onSettings, meta, toggleStar, togglePin }) {
@@ -432,14 +571,16 @@ function RepoMainPanel({ repo, repoId, active, tab, setTab, setActive, setRoute 
         <Subtab active={tab === "code"} onClick={() => setTab("code")} icon={<Icons.Code size={12} />}>Code</Subtab>
         <Subtab active={tab === "readme"} onClick={() => setTab("readme")} icon={<Icons.Book size={12} />}>Readme</Subtab>
         <Subtab active={tab === "commits"} onClick={() => setTab("commits")} icon={<Icons.Commit size={12} />}>Commits</Subtab>
+        <Subtab active={tab === "proposals"} onClick={() => setTab("proposals")} icon={<Icons.Diff size={12} />}>Proposals</Subtab>
         <Subtab active={tab === "activity"} onClick={() => setTab("activity")} icon={<Icons.Activity size={12} />}>Activity</Subtab>
         <Subtab active={tab === "releases"} onClick={() => setTab("releases")} icon={<Icons.Tag size={12} />}>Releases</Subtab>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        {tab === "code" ? <CodeView repoId={repoId} path={active} /> : null}
+        {tab === "code" ? <CodeView repoId={repoId} path={active} repo={repo} setRoute={setRoute} /> : null}
         {tab === "readme" ? <ReadmeView repoId={repoId} /> : null}
         {tab === "commits" ? <RepoCommitsList repoId={repoId} repo={repo} setRoute={setRoute} /> : null}
+        {tab === "proposals" ? <ProposalsView repoId={repoId} repo={repo} setRoute={setRoute} /> : null}
         {tab === "activity" ? <RecentActivityView repoId={repoId} /> : null}
         {tab === "releases" ? <ReleasesView repo={repo} repoId={repoId} /> : null}
       </div>
@@ -478,6 +619,83 @@ function RepoCommitsList({ repoId, repo, setRoute }) {
   );
 }
 
+// ProposalsView — the human-in-the-loop gate. Lists AI/code change proposals;
+// a writer reviews the diff and Accepts (applies to a feature branch + opens a
+// PR) or Rejects. Nothing touches the repo until Accept is clicked.
+function ProposalsView({ repoId, repo, setRoute }) {
+  const [items, setItems] = React.useState(null);
+  const [open, setOpen] = React.useState(null);   // expanded proposal id
+  const [busy, setBusy] = React.useState(false);
+  const [note, setNote] = React.useState("");
+  const canWrite = repo && ["owner", "admin", "write"].includes(repo.role);
+
+  const reload = React.useCallback(() => {
+    if (window.OrchisAPI && repoId) window.OrchisAPI.get(`/v1/repos/${repoId}/proposals`).then(setItems).catch(() => setItems([]));
+  }, [repoId]);
+  React.useEffect(() => { reload(); }, [reload]);
+
+  const act = async (id, verb) => {
+    setBusy(true); setNote("");
+    try {
+      const res = await window.OrchisAPI.post(`/v1/repos/${repoId}/proposals/${id}/${verb}`, {});
+      if (verb === "accept") setNote(`Accepted → committed to ${res.branch}${res.pullNumber ? `, opened PR #${res.pullNumber}` : ""}.`);
+      else setNote("Proposal rejected.");
+      reload();
+    } catch (e) { setNote(verb === "accept" ? "Accept failed — the patch may not apply cleanly." : "Reject failed."); }
+    finally { setBusy(false); }
+  };
+
+  const list = items || [];
+  const pill = (st) => ({ pending: "var(--accent)", accepted: "var(--ok, var(--accent))", rejected: "var(--fg-3)" }[st] || "var(--fg-3)");
+
+  return (
+    <div style={{ padding: "20px 24px", maxWidth: 900 }}>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <div>
+          <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Change proposals</h2>
+          <p className="subtle" style={{ fontSize: 12, margin: "2px 0 0" }}>AI- or tool-proposed edits. Review the diff, then Accept (applies to a new branch + opens a PR) or Reject. Nothing is applied until you accept.</p>
+        </div>
+      </div>
+      {note ? <div className="card" style={{ padding: "8px 12px", marginBottom: 10, fontSize: 12.5, color: "var(--accent)" }}>{note}</div> : null}
+      {items == null ? <div className="muted" style={{ fontSize: 12.5 }}>Loading…</div> : null}
+      {items != null && list.length === 0 ? <div className="card" style={{ padding: "20px 18px", color: "var(--fg-3)", fontSize: 13 }}>No proposals yet.</div> : null}
+      {list.map(p => (
+        <div key={p.id} className="card" style={{ marginBottom: 10, overflow: "hidden" }}>
+          <button onClick={() => setOpen(open === p.id ? null : p.id)}
+            style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "11px 14px", background: "transparent", border: "none", cursor: "pointer", font: "inherit", color: "inherit" }}>
+            <Icons.Diff size={14} style={{ color: "var(--fg-2)" }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 450 }}>{p.title}</div>
+              <div className="subtle" style={{ fontSize: 11.5, marginTop: 2 }}>by {p.author && p.author.name} · {p.when}{p.pullNumber ? ` · PR #${p.pullNumber}` : ""}</div>
+            </div>
+            <span className="chip" style={{ height: 18, fontSize: 10.5, color: pill(p.status), borderColor: "currentColor" }}>{p.status}</span>
+          </button>
+          {open === p.id ? (
+            <div style={{ borderTop: "1px solid var(--line)" }}>
+              {p.summary ? <div style={{ padding: "10px 14px", fontSize: 12.5, color: "var(--fg-2)" }}>{p.summary}</div> : null}
+              <pre style={{ margin: 0, padding: "12px 14px", overflowX: "auto", fontSize: 11.5, lineHeight: 1.5, fontFamily: "var(--font-mono)", background: "var(--bg-1)", maxHeight: 360 }}>
+                {p.patch ? p.patch : (p.changes || []).map(c => (c.delete ? `- delete ${c.path}\n` : `+ ${c.path}\n${c.content}\n`)).join("\n")}
+              </pre>
+              {canWrite && p.status === "pending" ? (
+                <div className="row" style={{ gap: 8, padding: 12, borderTop: "1px solid var(--line)" }}>
+                  <span className="spacer" />
+                  <button className="btn ghost" disabled={busy} onClick={() => act(p.id, "reject")}>Reject</button>
+                  <button className="btn primary" disabled={busy} onClick={() => act(p.id, "accept")}>{busy ? "Applying…" : "Accept changes"}</button>
+                </div>
+              ) : p.pullNumber ? (
+                <div className="row" style={{ padding: 12, borderTop: "1px solid var(--line)" }}>
+                  <span className="spacer" />
+                  <button className="btn ghost sm" onClick={() => setRoute && setRoute({ view: "pr", pr: p.pullNumber, repo: repoId })}>Open PR #{p.pullNumber}</button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // relativeDate renders an ISO date compactly (the API already sends UTC ISO).
 function relativeDate(iso) {
   if (!iso) return "";
@@ -498,20 +716,79 @@ function Subtab({ active, onClick, icon, children }) {
   );
 }
 
-function CodeView({ repoId, path }) {
+function CodeView({ repoId, path, repo, setRoute }) {
   const [blob, setBlob] = React.useState(null);
   const [err, setErr] = React.useState(false);
+  const [reload, setReload] = React.useState(0);
+  // Blame + outline + edit state.
+  const [blame, setBlame] = React.useState(null);
+  const [showBlame, setShowBlame] = React.useState(false);
+  const [outline, setOutline] = React.useState(null);
+  const [showOutline, setShowOutline] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState("");
+  const [msg, setMsg] = React.useState("");
+  const [toNew, setToNew] = React.useState(false);
+  const [newBranch, setNewBranch] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [note, setNote] = React.useState("");
+
+  const canWrite = repo && ["owner", "admin", "write"].includes(repo.role);
+  const defBranch = (repo && repo.defaultBranch) || "main";
 
   React.useEffect(() => {
     let cancelled = false;
-    setBlob(null); setErr(false);
+    setBlob(null); setErr(false); setBlame(null); setShowBlame(false);
+    setOutline(null); setShowOutline(false); setEditing(false); setNote("");
     if (window.OrchisAPI && repoId && path && path !== "README.md") {
       window.OrchisAPI.get(`/v1/repos/${repoId}/blob?path=${encodeURIComponent(path)}`)
         .then(b => { if (!cancelled) setBlob(b); })
         .catch(() => { if (!cancelled) setErr(true); });
     }
     return () => { cancelled = true; };
-  }, [repoId, path]);
+  }, [repoId, path, reload]);
+
+  const toggleBlame = () => {
+    if (!showBlame && blame == null && window.OrchisAPI) {
+      window.OrchisAPI.get(`/v1/repos/${repoId}/blame?path=${encodeURIComponent(path)}`)
+        .then(setBlame).catch(() => setBlame([]));
+    }
+    setShowBlame(v => !v); setShowOutline(false);
+  };
+
+  const toggleOutline = () => {
+    if (!showOutline && outline == null && window.OrchisAPI) {
+      window.OrchisAPI.get(`/v1/repos/${repoId}/outline?path=${encodeURIComponent(path)}`)
+        .then(setOutline).catch(() => setOutline([]));
+    }
+    setShowOutline(v => !v); setShowBlame(false);
+  };
+
+  const startEdit = () => {
+    setDraft(blob ? blob.content : "");
+    setMsg("Update " + path);
+    setToNew(false); setNewBranch(""); setNote(""); setShowBlame(false);
+    setEditing(true);
+  };
+
+  const commit = async () => {
+    setBusy(true); setNote("");
+    const branch = toNew ? newBranch.trim() : defBranch;
+    try {
+      const res = await window.OrchisAPI.post(`/v1/repos/${repoId}/commits`, {
+        branch, message: msg, changes: [{ path, content: draft }],
+      });
+      setEditing(false);
+      setNote(`Committed ${res.sha ? res.sha.slice(0, 7) : ""} to ${res.branch}.`);
+      if (toNew) {
+        // Don't silently change what the viewer sees; just confirm the branch.
+      } else {
+        setReload(n => n + 1); // refresh the blob on the same branch
+      }
+    } catch (e) {
+      setNote("Commit failed — you may lack write access, or the branch moved.");
+    } finally { setBusy(false); }
+  };
 
   if (path === "README.md") return <ReadmeView repoId={repoId} />;
 
@@ -536,10 +813,63 @@ function CodeView({ repoId, path }) {
         <div style={repoStyles.codeBar}>
           <span className="mono" style={{ color: "var(--fg-2)" }}>{path}</span>
           <span className="spacer" />
-          <span className="muted" style={{ fontSize: 11.5 }}>{blob.lines} lines · {fmtBytes(blob.size)} · {blob.lang}</span>
-          <button className="btn ghost sm icon"><Icons.Copy size={12} /></button>
+          {!editing ? <span className="muted" style={{ fontSize: 11.5 }}>{blob.lines} lines · {fmtBytes(blob.size)} · {blob.lang}</span> : null}
+          {!editing ? (
+            <button className={"btn ghost sm" + (showBlame ? " active" : "")} onClick={toggleBlame} title="Toggle blame">
+              <Icons.Activity size={12} /> Blame
+            </button>
+          ) : null}
+          {!editing && window.OrchisAPI ? (
+            <button className={"btn ghost sm" + (showOutline ? " active" : "")} onClick={toggleOutline} title="Show symbol outline">
+              <Icons.Code size={12} /> Outline
+            </button>
+          ) : null}
+          {canWrite && !editing ? (
+            <button className="btn ghost sm" onClick={startEdit} title="Edit this file"><Icons.Edit size={12} /> Edit</button>
+          ) : null}
         </div>
-        <CodeBlock code={blob.content} />
+
+        {note ? <div style={{ padding: "8px 14px", fontSize: 12, color: "var(--accent)", borderBottom: "1px solid var(--line)" }}>{note}</div> : null}
+
+        {editing ? (
+          <div style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
+            <textarea value={draft} onChange={e => setDraft(e.target.value)} spellCheck={false}
+              style={{ flex: 1, minHeight: 300, resize: "vertical", border: "none", outline: "none", padding: "12px 16px",
+                fontFamily: "var(--font-mono)", fontSize: 12.5, lineHeight: 1.6, background: "var(--bg-1)", color: "var(--fg)" }} />
+            <div style={{ borderTop: "1px solid var(--line)", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="row" style={{ gap: 8 }}>
+                <input className="input" value={msg} onChange={e => setMsg(e.target.value)} placeholder="Commit message" style={{ flex: 1 }} />
+                <button className="btn ghost sm" disabled={busy} title="Draft a Conventional Commit message with your model"
+                  onClick={async () => {
+                    try { const res = await window.OrchisAPI.post(`/v1/repos/${repoId}/commits/draft-message`, { changes: [{ path, content: draft }] }); if (res && res.message) setMsg(res.message); }
+                    catch (e) { setNote("Couldn't draft a message — is a model configured in Developer settings?"); }
+                  }}>
+                  <Icons.Bolt size={12} /> Generate
+                </button>
+              </div>
+              <div className="row" style={{ gap: 12, fontSize: 12.5, flexWrap: "wrap" }}>
+                <label className="row" style={{ gap: 6, cursor: "pointer" }}>
+                  <input type="radio" checked={!toNew} onChange={() => setToNew(false)} /> Commit to <span className="mono">{defBranch}</span>
+                </label>
+                <label className="row" style={{ gap: 6, cursor: "pointer" }}>
+                  <input type="radio" checked={toNew} onChange={() => setToNew(true)} /> New branch
+                </label>
+                {toNew ? <input className="input" value={newBranch} onChange={e => setNewBranch(e.target.value)} placeholder="feature/my-edit" style={{ flex: 1, minWidth: 160 }} /> : null}
+              </div>
+              <div className="row" style={{ gap: 8 }}>
+                <span className="spacer" />
+                <button className="btn ghost" onClick={() => setEditing(false)} disabled={busy}>Cancel</button>
+                <button className="btn primary" onClick={commit} disabled={busy || !msg.trim() || (toNew && !newBranch.trim())}>{busy ? "Committing…" : "Commit changes"}</button>
+              </div>
+            </div>
+          </div>
+        ) : showBlame && blame ? (
+          <BlameBlock code={blob.content} blame={blame} repoId={repoId} setRoute={setRoute} />
+        ) : showOutline && outline ? (
+          <OutlineList symbols={outline} />
+        ) : (
+          <CodeBlock code={blob.content} />
+        )}
       </div>
     );
   }
@@ -554,6 +884,52 @@ function CodeView({ repoId, path }) {
         {err ? `[ could not load ${path} ]` : `[ loading ${path}… ]`}
       </div>
     </div>
+  );
+}
+
+// OutlineList renders a file's structural symbols (AST-aware chunking). Lets a
+// reader (or the LLM, via the same endpoint) scan names before whole bodies.
+function OutlineList({ symbols }) {
+  const kindColor = { func: "var(--accent)", method: "var(--accent)", class: "oklch(64% 0.12 30)", struct: "oklch(64% 0.12 30)", enum: "oklch(64% 0.12 30)", interface: "oklch(60% 0.12 280)", type: "oklch(60% 0.12 280)" };
+  if (!symbols.length) return <div className="subtle" style={{ padding: 20, fontSize: 12.5 }}>No symbols detected (or unsupported language).</div>;
+  return (
+    <div style={{ padding: "10px 4px" }}>
+      {symbols.map((s, i) => (
+        <div key={i} className="row" style={{ gap: 10, padding: "6px 16px", fontSize: 12.5 }}>
+          <span className="chip" style={{ height: 17, fontSize: 9.5, color: kindColor[s.kind] || "var(--fg-3)", borderColor: "currentColor", minWidth: 52, justifyContent: "center" }}>{s.kind}</span>
+          <span className="mono" style={{ flex: 1 }}>{s.name}</span>
+          <span className="subtle" style={{ fontSize: 11 }}>L{s.lineStart}{s.lineEnd > s.lineStart ? `–${s.lineEnd}` : ""}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// BlameBlock renders the file with a per-line authorship gutter. Clicking a
+// line's sha opens that commit.
+function BlameBlock({ code, blame, repoId, setRoute }) {
+  const lines = code.split("\n");
+  const by = {};
+  blame.forEach(b => { by[b.line] = b; });
+  return (
+    <pre style={repoStyles.pre}>
+      {lines.map((ln, i) => {
+        const b = by[i + 1];
+        return (
+          <div key={i} style={repoStyles.codeLine}>
+            <span
+              onClick={() => b && setRoute && setRoute({ view: "commit", repo: repoId, sha: b.sha })}
+              title={b ? `${b.summary} — ${b.author}, ${b.when}` : ""}
+              style={{ display: "inline-block", width: 168, flexShrink: 0, paddingRight: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                color: "var(--fg-3)", fontSize: 10.5, cursor: b ? "pointer" : "default", borderRight: "1px solid var(--line)" }}>
+              {b ? <><span className="mono" style={{ color: "var(--accent)" }}>{b.short}</span> {b.author} · {b.when}</> : ""}
+            </span>
+            <span style={{ ...repoStyles.lineNo, width: 40 }}>{i + 1}</span>
+            <code style={{ whiteSpace: "pre", fontFamily: "var(--font-mono)" }}>{highlightRust(ln)}</code>
+          </div>
+        );
+      })}
+    </pre>
   );
 }
 

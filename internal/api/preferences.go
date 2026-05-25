@@ -14,7 +14,8 @@ var allowedPrefs = map[string]map[string]bool{
 	"density": {"default": true, "compact": true, "cozy": true},
 	"font":    {"geist": true, "serifMix": true, "mono": true},
 }
-var boolPrefs = map[string]bool{"showSplitTip": true}
+// aiChat gates the conversational chat sidebar. Absent = enabled (opt-out).
+var boolPrefs = map[string]bool{"showSplitTip": true, "aiChat": true}
 
 // loadPrefs returns the user's stored preferences as a map (empty if unset).
 func (s *Server) loadPrefs(r *http.Request, userID int64) map[string]any {

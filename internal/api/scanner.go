@@ -20,8 +20,10 @@ func (s *Server) modelSettings(ctx context.Context, userID int64) (scan.Settings
 	var st scan.Settings
 	var enabled int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT enabled, provider, base_url, model, api_key FROM scanner_settings WHERE user_id = ?`, userID).
-		Scan(&enabled, &st.Provider, &st.BaseURL, &st.Model, &st.APIKey)
+		`SELECT enabled, provider, base_url, model, api_key, context_budget, max_output_tokens, prune_globs
+		 FROM scanner_settings WHERE user_id = ?`, userID).
+		Scan(&enabled, &st.Provider, &st.BaseURL, &st.Model, &st.APIKey,
+			&st.ContextBudget, &st.MaxOutputTokens, &st.PruneGlobs)
 	if err != nil {
 		return scan.Settings{}, false
 	}
@@ -35,13 +37,16 @@ func (s *Server) modelSettings(ctx context.Context, userID int64) (scan.Settings
 func (s *Server) handleGetScanner(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
 	var enabled int
-	var provider, baseURL, model, apiKey string
+	var provider, baseURL, model, apiKey, pruneGlobs string
+	var contextBudget, maxOutputTokens int
 	err := s.db.QueryRowContext(r.Context(),
-		`SELECT enabled, provider, base_url, model, api_key FROM scanner_settings WHERE user_id = ?`, u.ID).
-		Scan(&enabled, &provider, &baseURL, &model, &apiKey)
+		`SELECT enabled, provider, base_url, model, api_key, context_budget, max_output_tokens, prune_globs
+		 FROM scanner_settings WHERE user_id = ?`, u.ID).
+		Scan(&enabled, &provider, &baseURL, &model, &apiKey, &contextBudget, &maxOutputTokens, &pruneGlobs)
 	if err == sql.ErrNoRows {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"enabled": false, "provider": "anthropic", "baseUrl": "", "model": "", "hasKey": false,
+			"contextBudget": 8000, "maxOutputTokens": 2048, "pruneGlobs": "",
 		})
 		return
 	}
@@ -50,11 +55,14 @@ func (s *Server) handleGetScanner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":  enabled == 1,
-		"provider": provider,
-		"baseUrl":  baseURL,
-		"model":    model,
-		"hasKey":   apiKey != "", // never return the key itself
+		"enabled":         enabled == 1,
+		"provider":        provider,
+		"baseUrl":         baseURL,
+		"model":           model,
+		"hasKey":          apiKey != "", // never return the key itself
+		"contextBudget":   contextBudget,
+		"maxOutputTokens": maxOutputTokens,
+		"pruneGlobs":      pruneGlobs,
 	})
 }
 
@@ -63,11 +71,14 @@ func (s *Server) handleGetScanner(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePutScanner(w http.ResponseWriter, r *http.Request) {
 	u := userFrom(r)
 	var in struct {
-		Enabled  bool   `json:"enabled"`
-		Provider string `json:"provider"`
-		BaseURL  string `json:"baseUrl"`
-		Model    string `json:"model"`
-		APIKey   string `json:"apiKey"`
+		Enabled         bool   `json:"enabled"`
+		Provider        string `json:"provider"`
+		BaseURL         string `json:"baseUrl"`
+		Model           string `json:"model"`
+		APIKey          string `json:"apiKey"`
+		ContextBudget   int    `json:"contextBudget"`
+		MaxOutputTokens int    `json:"maxOutputTokens"`
+		PruneGlobs      string `json:"pruneGlobs"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid body")
@@ -76,6 +87,13 @@ func (s *Server) handlePutScanner(w http.ResponseWriter, r *http.Request) {
 	if in.Provider != "anthropic" && in.Provider != "openai_compatible" {
 		writeError(w, http.StatusBadRequest, "provider must be 'anthropic' or 'openai_compatible'")
 		return
+	}
+	// Clamp the budgets to sane ranges (defaults when unset/out of range).
+	if in.ContextBudget < 1000 || in.ContextBudget > 200000 {
+		in.ContextBudget = 8000
+	}
+	if in.MaxOutputTokens < 256 || in.MaxOutputTokens > 32000 {
+		in.MaxOutputTokens = 2048
 	}
 
 	// Preserve existing key when the client doesn't send a new one.
@@ -91,17 +109,20 @@ func (s *Server) handlePutScanner(w http.ResponseWriter, r *http.Request) {
 		en = 1
 	}
 	_, err := s.db.ExecContext(r.Context(),
-		`INSERT INTO scanner_settings (user_id, enabled, provider, base_url, model, api_key, updated_at)
-		 VALUES (?,?,?,?,?,?, datetime('now'))
+		`INSERT INTO scanner_settings (user_id, enabled, provider, base_url, model, api_key, context_budget, max_output_tokens, prune_globs, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?, datetime('now'))
 		 ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled, provider=excluded.provider,
-		   base_url=excluded.base_url, model=excluded.model, api_key=excluded.api_key, updated_at=datetime('now')`,
-		u.ID, en, in.Provider, in.BaseURL, in.Model, key)
+		   base_url=excluded.base_url, model=excluded.model, api_key=excluded.api_key,
+		   context_budget=excluded.context_budget, max_output_tokens=excluded.max_output_tokens,
+		   prune_globs=excluded.prune_globs, updated_at=datetime('now')`,
+		u.ID, en, in.Provider, in.BaseURL, in.Model, key, in.ContextBudget, in.MaxOutputTokens, in.PruneGlobs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save scanner settings")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled": in.Enabled, "provider": in.Provider, "baseUrl": in.BaseURL, "model": in.Model, "hasKey": key != "",
+		"contextBudget": in.ContextBudget, "maxOutputTokens": in.MaxOutputTokens, "pruneGlobs": in.PruneGlobs,
 	})
 }
 

@@ -153,10 +153,26 @@ func (s *Server) Router() http.Handler {
 		r.Post("/repos/{org}/{name}/branches", s.requireScope("repo:write", s.handleCreateBranch))
 		r.Delete("/repos/{org}/{name}/branches/*", s.requireScope("repo:write", s.handleDeleteBranch))
 		r.Get("/repos/{org}/{name}/commits", s.handleRepoCommits)
+		r.Post("/repos/{org}/{name}/commits", s.requireScope("repo:write", s.handleBrowserCommit))
+		r.Post("/repos/{org}/{name}/commits/draft-message", s.requireUser(s.handleDraftCommitMessage))
 		r.Get("/repos/{org}/{name}/commits/{sha}", s.handleRepoCommitDetail)
+
+		// AI chat sidebar (per-user, toggleable)
+		r.Post("/repos/{org}/{name}/chat", s.requireUser(s.handleChat))
+		r.Get("/repos/{org}/{name}/chats", s.requireUser(s.handleListChats))
+		r.Get("/repos/{org}/{name}/chats/{id}", s.requireUser(s.handleGetChat))
+
+		// AI change proposals (human-in-the-loop gate)
+		r.Get("/repos/{org}/{name}/proposals", s.handleListProposals)
+		r.Post("/repos/{org}/{name}/proposals", s.requireScope("repo:write", s.handleCreateProposal))
+		r.Get("/repos/{org}/{name}/proposals/{id}", s.handleGetProposal)
+		r.Post("/repos/{org}/{name}/proposals/{id}/accept", s.requireScope("repo:write", s.handleAcceptProposal))
+		r.Post("/repos/{org}/{name}/proposals/{id}/reject", s.requireScope("repo:write", s.handleRejectProposal))
 		r.Get("/repos/{org}/{name}/compare", s.handleCompare)
 		r.Get("/repos/{org}/{name}/checks", s.handleRepoChecks)
 		r.Get("/repos/{org}/{name}/activity", s.handleRepoActivity)
+		r.Get("/repos/{org}/{name}/blame", s.handleRepoBlame)
+		r.Get("/repos/{org}/{name}/outline", s.handleRepoOutline)
 		r.Get("/repos/{org}/{name}/pack", s.handleRepoPack)
 
 		// Issues
