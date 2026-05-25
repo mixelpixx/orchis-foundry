@@ -148,6 +148,7 @@ function App() {
   else if (route.view === "commit") view = <CommitView route={route} setRoute={navigate} />;
   else if (route.view === "user") view = <UserProfileView route={route} setRoute={navigate} />;
   else if (route.view === "settings") view = <DevSettingsView route={route} setRoute={navigate} />;
+  else if (route.view === "admin") view = <AdminView route={route} setRoute={navigate} />;
   else if (route.view === "repo") view = <RepoView repoId={route.repo} file={route.file} setRoute={navigate} openSplit={openSplit} splitOpen={splitOpen} splitContent={splitContent} closeSplit={() => setSplitOpen(false)} />;
   else view = <DashboardView setRoute={navigate} openPalette={() => setPaletteOpen(true)} route={route} />;
 
@@ -253,6 +254,40 @@ const appStyles = {
 // e.g. opening index.html from disk), falls back to the mock so the prototype
 // still works standalone.
 function SignIn() {
+  const [methods, setMethods] = React.useState(null);
+  const [mode, setMode] = React.useState("login");   // "login" | "signup"
+  const [email, setEmail] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState("");
+
+  React.useEffect(() => {
+    fetch("/v1/auth/methods", { credentials: "same-origin" })
+      .then(r => r.json())
+      .then(setMethods)
+      .catch(() => setMethods({ localLogin: true, localSignup: false, providers: [] }));
+  }, []);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setErr("");
+    const signup = mode === "signup";
+    const body = signup ? { email, name, password } : { identifier: email, password };
+    try {
+      const r = await fetch(signup ? "/v1/auth/signup" : "/v1/auth/login", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || "Sign-in failed"); }
+      window.location.assign("/");
+    } catch (e2) { setErr(e2.message); setBusy(false); }
+  };
+
+  const m = methods || { localLogin: true, localSignup: false, providers: [] };
+  const showForm = m.localLogin || (mode === "signup" && m.localSignup);
+  const hasProviders = m.providers && m.providers.length > 0;
+
   return (
     <div style={{
       position: "fixed", inset: 0, display: "flex", alignItems: "center",
@@ -267,19 +302,58 @@ function SignIn() {
         <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.02em", marginBottom: 6 }}>
           Orchis Foundry
         </div>
-        <div style={{ fontSize: 13.5, color: "var(--fg-2)", marginBottom: 24 }}>
-          A calm, self-hosted code platform. Sign in to continue.
+        <div style={{ fontSize: 13.5, color: "var(--fg-2)", marginBottom: 20 }}>
+          A calm, self-hosted code platform.
         </div>
-        <a href="/v1/auth/oidc/github" style={{
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          padding: "11px 16px", borderRadius: 10, textDecoration: "none",
-          background: "var(--fg)", color: "var(--bg)", fontSize: 14, fontWeight: 500,
-        }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.46-1.11-1.46-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.84-2.34 4.69-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
-          </svg>
-          Sign in with GitHub
-        </a>
+
+        {showForm ? (
+          <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, textAlign: "left" }}>
+            <input className="input" type="email" placeholder="Email" autoComplete="email" required
+              value={email} onChange={e => setEmail(e.target.value)} />
+            {mode === "signup" ? (
+              <input className="input" placeholder="Display name (optional)"
+                value={name} onChange={e => setName(e.target.value)} />
+            ) : null}
+            <input className="input" type="password" placeholder="Password" autoComplete={mode === "signup" ? "new-password" : "current-password"} required
+              value={password} onChange={e => setPassword(e.target.value)} />
+            {err ? <div style={{ color: "var(--danger)", fontSize: 12.5 }}>{err}</div> : null}
+            <button className="btn primary" type="submit" disabled={busy} style={{ justifyContent: "center" }}>
+              {busy ? "…" : (mode === "signup" ? "Create account" : "Sign in")}
+            </button>
+          </form>
+        ) : null}
+
+        {m.localSignup ? (
+          <button className="btn ghost sm" style={{ marginTop: 8 }}
+            onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setErr(""); }}>
+            {mode === "signup" ? "Have an account? Sign in" : "Create an account"}
+          </button>
+        ) : null}
+
+        {hasProviders ? (
+          <>
+            {showForm ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 4px", color: "var(--fg-3)", fontSize: 11.5 }}>
+                <span style={{ flex: 1, height: 1, background: "var(--line)" }} /> or <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
+              </div>
+            ) : null}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+              {m.providers.map(p => (
+                <a key={p.id} href={"/v1/auth/oidc/" + p.id} style={{
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                  padding: "10px 16px", borderRadius: 10, textDecoration: "none",
+                  background: "var(--fg)", color: "var(--bg)", fontSize: 14, fontWeight: 500,
+                }}>Continue with {p.label}</a>
+              ))}
+            </div>
+          </>
+        ) : null}
+
+        {!showForm && !m.localSignup && !hasProviders ? (
+          <div style={{ marginTop: 18, fontSize: 13, color: "var(--fg-2)" }}>
+            No sign-in methods are enabled. Contact your administrator.
+          </div>
+        ) : null}
       </div>
     </div>
   );

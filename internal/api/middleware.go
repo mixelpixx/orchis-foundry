@@ -24,7 +24,7 @@ func (s *Server) authClaims(next http.Handler) http.Handler {
 
 		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 			tok := strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
-			if ta, err := s.sessions.ValidateToken(ctx, tok); err == nil {
+			if ta, err := s.sessions.ValidateToken(ctx, tok); err == nil && ta.User != nil && !ta.User.Disabled {
 				ctx = context.WithValue(ctx, ctxUserKey, ta.User)
 				ctx = context.WithValue(ctx, ctxScopesKey, ta.Scopes)
 				next.ServeHTTP(w, r.WithContext(ctx))
@@ -68,6 +68,19 @@ func (s *Server) requireScope(scope string, h http.HandlerFunc) http.HandlerFunc
 	return s.requireUser(func(w http.ResponseWriter, r *http.Request) {
 		if !hasScope(scopesFrom(r), scope) {
 			writeError(w, http.StatusForbidden, "token missing required scope: "+scope)
+			return
+		}
+		h(w, r)
+	})
+}
+
+// requireInstanceAdmin wraps a handler, requiring an authenticated instance
+// admin (users.is_admin) — distinct from the per-repo admin role in acl.go.
+func (s *Server) requireInstanceAdmin(h http.HandlerFunc) http.HandlerFunc {
+	return s.requireUser(func(w http.ResponseWriter, r *http.Request) {
+		u := userFrom(r)
+		if u == nil || !u.IsAdmin {
+			writeError(w, http.StatusForbidden, "admin access required")
 			return
 		}
 		h(w, r)

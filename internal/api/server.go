@@ -29,6 +29,7 @@ type Server struct {
 	db       *sql.DB
 	sessions *auth.Manager
 	github   *oidc.GitHub
+	generic  map[string]*oidc.Generic // generic OIDC providers (Entra/Google/…) by id
 	git      *gitstore.Store
 	scan     *scan.Worker
 	webhooks *webhook.Worker
@@ -37,7 +38,18 @@ type Server struct {
 
 // New constructs a Server. webFS is the embedded (or on-disk) frontend tree.
 func New(cfg *config.Config, log *slog.Logger, webFS fs.FS, db *sql.DB, sessions *auth.Manager, github *oidc.GitHub, git *gitstore.Store, scanWorker *scan.Worker, webhookWorker *webhook.Worker, hub *realtime.Hub) *Server {
-	return &Server{cfg: cfg, log: log, web: webFS, db: db, sessions: sessions, github: github, git: git, scan: scanWorker, webhooks: webhookWorker, rt: hub}
+	s := &Server{cfg: cfg, log: log, web: webFS, db: db, sessions: sessions, github: github, git: git, scan: scanWorker, webhooks: webhookWorker, rt: hub}
+	// Build generic OIDC providers (anything configured with an issuer that
+	// isn't the bespoke GitHub OAuth2 path). They self-discover lazily.
+	s.generic = map[string]*oidc.Generic{}
+	for _, p := range cfg.OIDC {
+		if p.ID == "" || p.ID == "github" || p.Issuer == "" || p.ClientID == "" {
+			continue
+		}
+		s.generic[p.ID] = oidc.NewGeneric(p.ID, p.Issuer, p.ClientID, p.ClientSecret,
+			cfg.ExternalURL+"/v1/auth/oidc/callback", p.Scopes)
+	}
+	return s
 }
 
 // Router builds the chi router with all routes mounted.
@@ -71,6 +83,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/openapi.json", s.handleOpenAPI)
 
 		// Auth & session
+		r.Get("/auth/methods", s.handleAuthMethods)
+		r.Post("/auth/login", s.handleLogin)
+		r.Post("/auth/signup", s.handleSignup)
 		r.Get("/auth/oidc/callback", s.handleOIDCCallback)
 		r.Get("/auth/oidc/{provider}", s.handleOIDCStart)
 		r.Post("/auth/logout", s.handleLogout)
@@ -106,6 +121,14 @@ func (s *Server) Router() http.Handler {
 		r.Patch("/repos/{org}/{name}/webhooks/{id}", s.requireScope("repo:admin", s.handleUpdateWebhook))
 		r.Delete("/repos/{org}/{name}/webhooks/{id}", s.requireScope("repo:admin", s.handleDeleteWebhook))
 		r.Post("/repos/{org}/{name}/webhooks/{id}/test", s.requireScope("repo:admin", s.handleTestWebhook))
+
+		// Instance administration (auth config + user lifecycle)
+		r.Get("/admin/settings", s.requireInstanceAdmin(s.handleAdminGetSettings))
+		r.Put("/admin/settings", s.requireInstanceAdmin(s.handleAdminPutSettings))
+		r.Get("/admin/users", s.requireInstanceAdmin(s.handleAdminListUsers))
+		r.Post("/admin/users", s.requireInstanceAdmin(s.handleAdminCreateUser))
+		r.Patch("/admin/users/{id}", s.requireInstanceAdmin(s.handleAdminUpdateUser))
+		r.Delete("/admin/users/{id}", s.requireInstanceAdmin(s.handleAdminDeleteUser))
 
 		// Dashboard
 		r.Get("/me/activity", s.requireUser(s.handleActivity))

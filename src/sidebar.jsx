@@ -6,6 +6,10 @@ function Sidebar({ route, setRoute, openPalette, openTokens, theme, setTheme }) 
     { id: "search", label: "Search", icon: <Icons.Search /> },
     { id: "settings", label: "Developer", icon: <Icons.Key /> },
   ];
+  // Instance admins get an Admin entry (auth config + user management).
+  if (window.USERS && USERS.me && USERS.me.isAdmin) {
+    navItems.push({ id: "admin", label: "Admin", icon: <Icons.Settings /> });
+  }
 
   const [pinnedState, setPinnedState] = React.useState(null);
   React.useEffect(() => {

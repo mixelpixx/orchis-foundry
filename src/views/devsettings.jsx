@@ -872,3 +872,161 @@ const dsStyles = {
 };
 
 window.DevSettingsView = DevSettingsView;
+
+// ---- Instance admin panel (admins only) -----------------------------------
+
+function AdminToggle({ label, hint, value, onChange }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid var(--line)" }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13 }}>{label}</div>
+        {hint ? <div className="subtle" style={{ fontSize: 11.5 }}>{hint}</div> : null}
+      </div>
+      <button onClick={() => onChange(!value)} aria-pressed={value} style={{
+        width: 36, height: 20, borderRadius: 999, padding: 0, position: "relative", cursor: "pointer",
+        border: "1px solid " + (value ? "var(--accent-line)" : "var(--line-strong)"),
+        background: value ? "var(--accent)" : "var(--bg-2)",
+      }}>
+        <span style={{ position: "absolute", top: 1, left: value ? 17 : 1, width: 16, height: 16, borderRadius: 999, background: value ? "var(--accent-fg)" : "var(--fg-2)", transition: "left 120ms" }} />
+      </button>
+    </div>
+  );
+}
+
+function AdminAuthPanel() {
+  const [cfg, setCfg] = React.useState(null);
+  const [saved, setSaved] = React.useState(false);
+  const [err, setErr] = React.useState("");
+  React.useEffect(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get("/v1/admin/settings").then(setCfg).catch(() => setErr("Could not load settings."));
+  }, []);
+  if (!cfg) return <div className="muted" style={{ padding: 20 }}>{err || "Loading…"}</div>;
+  const setLocal = (k, v) => { setCfg(c => ({ ...c, [k]: v })); setSaved(false); };
+  const setProv = (id, v) => { setCfg(c => ({ ...c, providers: c.providers.map(p => p.id === id ? { ...p, enabled: v } : p) })); setSaved(false); };
+  const save = async () => {
+    setErr("");
+    const providers = {}; (cfg.providers || []).forEach(p => { providers[p.id] = p.enabled; });
+    try {
+      const res = await window.OrchisAPI.put("/v1/admin/settings", { localLogin: cfg.localLogin, localSignup: cfg.localSignup, providers });
+      setCfg(res); setSaved(true);
+    } catch (e) { setErr("Could not save."); }
+  };
+  return (
+    <>
+      <div style={dsStyles.head}><div>
+        <h2 style={dsStyles.h2}>Authentication</h2>
+        <p className="muted" style={dsStyles.subtitle}>Choose which sign-in and sign-up methods are available on this instance.</p>
+      </div></div>
+      {err ? <div style={{ padding: "8px 12px", border: "1px solid var(--danger)", borderRadius: 6, color: "var(--danger)", fontSize: 12.5, margin: "14px 0" }}>{err}</div> : null}
+      {saved ? <div style={{ padding: "8px 12px", border: "1px solid var(--accent-line)", background: "var(--accent-soft)", borderRadius: 6, color: "var(--accent)", fontSize: 12.5, margin: "14px 0" }}>Saved.</div> : null}
+      <div className="card" style={{ marginTop: 14, padding: 4 }}>
+        <AdminToggle label="Email + password sign-in" hint="Let users log in with a local account." value={cfg.localLogin} onChange={v => setLocal("localLogin", v)} />
+        <AdminToggle label="Open sign-up" hint="Anyone who can reach this server can create an account." value={cfg.localSignup} onChange={v => setLocal("localSignup", v)} />
+        {(cfg.providers || []).map(p => (
+          <AdminToggle key={p.id} label={"Sign in with " + p.label} hint={"OIDC provider (configured in orchis.yaml)."} value={p.enabled} onChange={v => setProv(p.id, v)} />
+        ))}
+      </div>
+      {(!cfg.providers || cfg.providers.length === 0) ? (
+        <p className="subtle" style={{ marginTop: 12, fontSize: 11.5 }}>No OIDC providers configured. Add a provider (GitHub / Google / Microsoft Entra) under <span className="mono">oidc:</span> in <span className="mono">orchis.yaml</span> to enable SSO here.</p>
+      ) : null}
+      <div className="row" style={{ marginTop: 14 }}><span className="spacer" /><button className="btn primary" onClick={save}>Save</button></div>
+    </>
+  );
+}
+
+function AdminUsersPanel() {
+  const [users, setUsers] = React.useState(null);
+  const [err, setErr] = React.useState("");
+  const [creating, setCreating] = React.useState(false);
+  const [nu, setNu] = React.useState({ email: "", name: "", password: "" });
+  const reload = React.useCallback(() => {
+    if (window.OrchisAPI) window.OrchisAPI.get("/v1/admin/users").then(setUsers).catch(() => setErr("Could not load users."));
+  }, []);
+  React.useEffect(() => { reload(); }, [reload]);
+  const patch = async (id, body) => { setErr(""); try { await window.OrchisAPI.patch("/v1/admin/users/" + id, body); reload(); } catch (e) { setErr(errMsg(e)); } };
+  const del = async (id) => { if (!window.confirm("Delete this user permanently?")) return; setErr(""); try { await window.OrchisAPI.del("/v1/admin/users/" + id); reload(); } catch (e) { setErr(errMsg(e)); } };
+  const resetPw = async (id) => { const p = window.prompt("New password (min 8 chars):"); if (!p) return; await patch(id, { password: p }); };
+  const create = async () => {
+    setErr("");
+    try { await window.OrchisAPI.post("/v1/admin/users", nu); setNu({ email: "", name: "", password: "" }); setCreating(false); reload(); }
+    catch (e) { setErr(errMsg(e)); }
+  };
+  const list = users || [];
+  return (
+    <>
+      <div style={dsStyles.head}>
+        <div>
+          <h2 style={dsStyles.h2}>Users</h2>
+          <p className="muted" style={dsStyles.subtitle}>Manage accounts: grant admin, disable (deprovision), reset passwords.</p>
+        </div>
+        <button className="btn primary" onClick={() => setCreating(c => !c)}><Icons.Plus size={14} /> New user</button>
+      </div>
+      {err ? <div style={{ padding: "8px 12px", border: "1px solid var(--danger)", borderRadius: 6, color: "var(--danger)", fontSize: 12.5, margin: "14px 0" }}>{err}</div> : null}
+      {creating ? (
+        <div className="card fade-in" style={{ padding: 16, marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+          <input className="input" placeholder="Email" value={nu.email} onChange={e => setNu({ ...nu, email: e.target.value })} />
+          <input className="input" placeholder="Display name (optional)" value={nu.name} onChange={e => setNu({ ...nu, name: e.target.value })} />
+          <input className="input" type="password" placeholder="Initial password (min 8)" value={nu.password} onChange={e => setNu({ ...nu, password: e.target.value })} />
+          <div className="row" style={{ gap: 8 }}><span className="spacer" /><button className="btn ghost" onClick={() => setCreating(false)}>Cancel</button><button className="btn primary" onClick={create} disabled={!nu.email || nu.password.length < 8}>Create</button></div>
+        </div>
+      ) : null}
+      <div className="card" style={{ marginTop: 14, overflow: "hidden" }}>
+        {list.map((u, i) => (
+          <div key={u.id} className="row" style={{ gap: 12, padding: "12px 14px", borderBottom: i < list.length - 1 ? "1px solid var(--line)" : "none", opacity: u.disabled ? 0.55 : 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="row" style={{ gap: 8 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 500 }}>{u.name || u.handle}</span>
+                {u.isAdmin ? <span className="chip accent" style={{ height: 18, fontSize: 10 }}>admin</span> : null}
+                {u.disabled ? <span className="chip" style={{ height: 18, fontSize: 10 }}>disabled</span> : null}
+                {!u.hasPassword ? <span className="chip" style={{ height: 18, fontSize: 10 }}>SSO only</span> : null}
+              </div>
+              <div className="subtle" style={{ fontSize: 11.5, marginTop: 2 }}>@{u.handle}{u.email ? " · " + u.email : ""}</div>
+            </div>
+            <button className="btn ghost sm" onClick={() => patch(u.id, { isAdmin: !u.isAdmin })}>{u.isAdmin ? "Remove admin" : "Make admin"}</button>
+            <button className="btn ghost sm" onClick={() => patch(u.id, { disabled: !u.disabled })}>{u.disabled ? "Enable" : "Disable"}</button>
+            <button className="btn ghost sm" onClick={() => resetPw(u.id)}>Reset password</button>
+            <button className="btn ghost sm" style={{ color: "var(--danger)" }} onClick={() => del(u.id)}>Delete</button>
+          </div>
+        ))}
+        {users != null && list.length === 0 ? <div className="subtle" style={{ padding: 16, fontSize: 12.5 }}>No users.</div> : null}
+      </div>
+    </>
+  );
+}
+
+function errMsg(e) {
+  const m = (e && e.message) || "";
+  const i = m.indexOf("-> ");
+  return i >= 0 ? "Action failed (" + m.slice(i + 3) + ")." : "Action failed.";
+}
+
+function AdminView() {
+  const [tab, setTab] = React.useState("auth");
+  const tabs = [{ id: "auth", label: "Authentication", icon: <Icons.Key /> }, { id: "users", label: "Users", icon: <Icons.Eye /> }];
+  return (
+    <div style={{ overflowY: "auto", height: "100%" }}>
+      <div style={dsStyles.page} className="fade-in">
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 11.5, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Admin</div>
+          <h1 style={{ fontSize: 26, fontWeight: 500, letterSpacing: "-0.02em", margin: 0 }}>Instance administration</h1>
+          <p className="muted" style={{ margin: "6px 0 0", fontSize: 14, maxWidth: 540 }}>Authentication methods and user accounts for this Orchis instance.</p>
+        </div>
+        <div style={dsStyles.layout}>
+          <nav style={dsStyles.sideTabs}>
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)} style={{ ...dsStyles.sideTab, ...(tab === t.id ? dsStyles.sideTabActive : {}) }}>
+                <span style={{ width: 16, color: tab === t.id ? "var(--accent)" : "var(--fg-2)" }}>{t.icon}</span>
+                <span style={{ flex: 1, textAlign: "left" }}>{t.label}</span>
+              </button>
+            ))}
+          </nav>
+          <div style={dsStyles.main}>
+            {tab === "auth" ? <AdminAuthPanel /> : <AdminUsersPanel />}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+window.AdminView = AdminView;

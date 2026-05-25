@@ -13,6 +13,11 @@ import (
 // handleOIDCStart kicks off provider sign-in: mint state, redirect to provider.
 func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 	provider := chi.URLParam(r, "provider")
+	// Respect the admin enable toggle for every provider.
+	if !s.settingBool(r.Context(), "auth.provider."+provider, true) {
+		writeError(w, http.StatusForbidden, "this sign-in method is disabled")
+		return
+	}
 	switch provider {
 	case "github":
 		if s.github == nil || !s.github.Configured() {
@@ -26,7 +31,23 @@ func (s *Server) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Redirect(w, r, s.github.AuthURL(state), http.StatusFound)
 	default:
-		writeError(w, http.StatusNotFound, "unknown provider")
+		g := s.generic[provider]
+		if g == nil || !g.Configured() {
+			writeError(w, http.StatusNotFound, "unknown provider")
+			return
+		}
+		state, err := s.sessions.NewOAuthState(r.Context(), provider)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not start sign-in")
+			return
+		}
+		authURL, err := g.AuthURL(r.Context(), state)
+		if err != nil {
+			s.log.Error("oidc discovery failed", "provider", provider, "err", err)
+			writeError(w, http.StatusBadGateway, "sign-in provider is unreachable")
+			return
+		}
+		http.Redirect(w, r, authURL, http.StatusFound)
 	}
 }
 
@@ -59,8 +80,20 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 			p.Provider, p.Subject, p.Handle, p.Name, p.Email, p.Avatar,
 		}
 	default:
-		writeError(w, http.StatusBadRequest, "unknown provider")
-		return
+		g := s.generic[provider]
+		if g == nil {
+			writeError(w, http.StatusBadRequest, "unknown provider")
+			return
+		}
+		p, err := g.Exchange(r.Context(), code)
+		if err != nil {
+			s.log.Error("oidc exchange failed", "provider", provider, "err", err)
+			writeError(w, http.StatusBadGateway, "sign-in failed talking to the provider")
+			return
+		}
+		profile = &struct{ Provider, Subject, Handle, Name, Email, Avatar string }{
+			p.Provider, p.Subject, p.Handle, p.Name, p.Email, p.Avatar,
+		}
 	}
 
 	userID, err := s.sessions.UpsertOIDCUser(r.Context(),

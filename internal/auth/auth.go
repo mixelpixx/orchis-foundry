@@ -33,6 +33,7 @@ type User struct {
 	AvatarURL string `json:"avatarUrl"`
 	Bio       string `json:"bio"`
 	IsAdmin   bool   `json:"isAdmin"`
+	Disabled  bool   `json:"-"`
 }
 
 // Manager owns session + user persistence.
@@ -129,14 +130,15 @@ func (m *Manager) EnsureUserByHandle(ctx context.Context, handle string) (int64,
 // GetUser loads a user by ID.
 func (m *Manager) GetUser(ctx context.Context, id int64) (*User, error) {
 	u := &User{ID: id}
-	var admin int
+	var admin, disabled int
 	err := m.db.QueryRowContext(ctx,
-		`SELECT handle, name, email, avatar_url, bio, is_admin FROM users WHERE id = ?`, id).
-		Scan(&u.Handle, &u.Name, &u.Email, &u.AvatarURL, &u.Bio, &admin)
+		`SELECT handle, name, email, avatar_url, bio, is_admin, disabled FROM users WHERE id = ?`, id).
+		Scan(&u.Handle, &u.Name, &u.Email, &u.AvatarURL, &u.Bio, &admin, &disabled)
 	if err != nil {
 		return nil, err
 	}
 	u.IsAdmin = admin == 1
+	u.Disabled = disabled == 1
 	return u, nil
 }
 
@@ -265,7 +267,7 @@ func (m *Manager) UserFromRequest(ctx context.Context, r *http.Request) *User {
 	}
 	_, _ = m.db.ExecContext(ctx, `UPDATE sessions SET last_seen_at = datetime('now') WHERE id = ?`, c.Value)
 	u, err := m.GetUser(ctx, userID)
-	if err != nil {
+	if err != nil || u.Disabled {
 		return nil
 	}
 	return u
