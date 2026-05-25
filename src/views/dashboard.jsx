@@ -86,7 +86,6 @@ function DashboardView({ setRoute, openPalette, route }) {
           <section style={dashStyles.section}>
             <div style={dashStyles.sectionHead}>
               <h2 style={dashStyles.h2}>Pinned</h2>
-              <button className="btn ghost sm">Manage</button>
             </div>
             <div style={dashStyles.repoGrid}>
               {REPOS.filter(r => r.pinned).map(r => (

@@ -161,12 +161,14 @@ button { font-family: inherit; }
 .btn.icon { width: var(--row-h); padding: 0; justify-content: center; }
 .btn.sm { height: 26px; font-size: var(--t-xs); padding: 0 8px; }
 
-/* Focus: no lingering ring on mouse click; a clean accent ring for keyboard
-   navigation only (:focus-visible). Applies to all buttons app-wide. */
+/* Focus: no lingering ring on mouse click; a clean, high-contrast accent ring
+   for keyboard navigation only (:focus-visible). Uses --accent (not the dim
+   --accent-line) with a 2px offset so it reads in both light and dark mode and
+   even around filled/primary buttons. Applies to all buttons app-wide. */
 button:focus { outline: none; }
 button:focus-visible {
-  outline: 2px solid var(--accent-line);
-  outline-offset: 1px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 

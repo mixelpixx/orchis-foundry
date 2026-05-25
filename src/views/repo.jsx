@@ -119,7 +119,7 @@ function RepoView({ repoId, file, setRoute, openSplit, splitOpen, splitContent, 
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>main</span>
               <Icons.ChevronDown size={11} style={{ color: "var(--fg-3)" }} />
             </span>
-            <button className="btn ghost icon sm" title="Find in files"><Icons.Search size={12} /></button>
+            <button className="btn ghost icon sm" title="Find in files" onClick={() => setRoute({ view: "search", repo: repoId })}><Icons.Search size={12} /></button>
           </div>
           <div style={repoStyles.treeScroll}>
             {treeNodes.length === 0
@@ -1041,7 +1041,14 @@ function inlineMd(s) {
   return s
     .replace(/`([^`]+)`/g, "<code style=\"font-family: var(--font-mono); background: var(--bg-2); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;\">$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<a href=\"#\" style=\"color: var(--accent); text-decoration: none;\">$1</a>");
+    // Render real links, but only for http(s)/root-relative URLs — anything else
+    // (e.g. javascript:) is kept as plain text to avoid an injection vector via
+    // dangerouslySetInnerHTML.
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) => {
+      const u = url.trim();
+      if (!/^(https?:\/\/|\/)/i.test(u)) return text;
+      return "<a href=\"" + u + "\" target=\"_blank\" rel=\"noreferrer noopener\" style=\"color: var(--accent); text-decoration: none;\">" + text + "</a>";
+    });
 }
 
 function RecentActivityView({ repoId }) {

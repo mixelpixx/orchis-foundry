@@ -748,16 +748,26 @@ function ScannerPanel() {
 }
 
 function AppsPanel() {
+  // OAuth-app authorization isn't part of the platform yet, so there's no
+  // /v1/me/oauth-apps endpoint. Show an honest empty state when running against
+  // a real backend; the sample rows only appear in the offline prototype.
+  const demo = [
+    { name: "kelp-deploy-bot", scopes: ["repo:read", "actions:read"], by: "kelp", last: "today" },
+    { name: "atlas-dashboard", scopes: ["repo:read"], by: "open-strata", last: "2 weeks ago" },
+  ];
+  const apps = window.OrchisAPI ? [] : demo;
   return (
     <div>
       <h2 style={dsStyles.h2}>OAuth apps</h2>
       <p className="muted" style={dsStyles.subtitle}>Apps you've authorized to act on your behalf.</p>
+      {apps.length === 0 ? (
+        <div className="card" style={{ marginTop: 14, padding: "20px 18px", color: "var(--fg-3)", fontSize: 13 }}>
+          No authorized OAuth apps. Apps you grant access to will appear here.
+        </div>
+      ) : (
       <div className="card" style={{ marginTop: 14 }}>
-        {[
-          { name: "kelp-deploy-bot", scopes: ["repo:read", "actions:read"], by: "kelp", last: "today" },
-          { name: "atlas-dashboard", scopes: ["repo:read"], by: "open-strata", last: "2 weeks ago" },
-        ].map((a, i) => (
-          <div key={a.name} style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", borderBottom: i === 0 ? "1px solid var(--line)" : "none" }}>
+        {apps.map((a, i) => (
+          <div key={a.name} style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 18px", borderBottom: i < apps.length - 1 ? "1px solid var(--line)" : "none" }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg-2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icons.Bolt size={14} />
             </div>
@@ -768,46 +778,59 @@ function AppsPanel() {
                 {a.scopes.map(s => <span key={s} className="mono chip" style={{ fontSize: 10.5 }}>{s}</span>)}
               </div>
             </div>
-            <button className="btn ghost sm" style={{ color: "var(--danger)" }}>Revoke</button>
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }
 
 function PreferencesPanel() {
+  // Real, persisted preferences only. These map to backend pref keys
+  // (internal/api/preferences.go boolPrefs) and are saved to the account via
+  // PATCH /v1/me/preferences. Both default to on when unset (opt-out).
+  const [prefs, setPrefs] = React.useState(null);
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get("/v1/me/preferences").then(p => setPrefs(p || {})).catch(() => setPrefs({}));
+    } else { setPrefs({}); }
+  }, []);
+  const set = (key, val) => {
+    setPrefs(p => ({ ...p, [key]: val }));
+    if (window.OrchisAPI) window.OrchisAPI.patch("/v1/me/preferences", { [key]: val }).catch(() => {});
+  };
+  if (!prefs) return <div className="muted" style={{ padding: 20 }}>Loading…</div>;
+  const on = (k) => prefs[k] !== false; // unset ⇒ enabled
+
   return (
     <div>
       <h2 style={dsStyles.h2}>Preferences</h2>
-      <p className="muted" style={dsStyles.subtitle}>Tune Orchis to your workflow.</p>
+      <p className="muted" style={dsStyles.subtitle}>Tune Orchis to your workflow. Changes save to your account.</p>
       <div className="card" style={{ marginTop: 14, padding: 4 }}>
-        <PrefRow label="Email me on review requests" defaultOn />
-        <PrefRow label="Email me when a PAT is about to expire" defaultOn />
-        <PrefRow label="Show 'Cmd+K' hint on home" defaultOn />
-        <PrefRow label="Show keyboard shortcuts in tooltips" defaultOn />
-        <PrefRow label="Auto-merge when checks pass (per-PR opt-in)" />
+        <PrefRow label="Show keyboard hints (⌘K / split tip)" value={on("showSplitTip")} onChange={v => set("showSplitTip", v)} />
+        <PrefRow label="AI chat sidebar in repositories" value={on("aiChat")} onChange={v => set("aiChat", v)} last />
       </div>
+      <p className="subtle" style={{ marginTop: 12, fontSize: 11.5 }}>Theme, accent, density, and font live in the Tweaks panel and also sync to your account.</p>
     </div>
   );
 }
 
-function PrefRow({ label, defaultOn }) {
-  const [on, setOn] = React.useState(!!defaultOn);
+function PrefRow({ label, value, onChange, last }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid var(--line)" }}>
+    <div style={{ display: "flex", alignItems: "center", padding: "10px 14px", borderBottom: last ? "none" : "1px solid var(--line)" }}>
       <span style={{ flex: 1, fontSize: 13 }}>{label}</span>
-      <button onClick={() => setOn(o => !o)} style={{
+      <button onClick={() => onChange(!value)} aria-pressed={value} style={{
         width: 36, height: 20, borderRadius: 999,
-        border: "1px solid " + (on ? "var(--accent-line)" : "var(--line-strong)"),
-        background: on ? "var(--accent)" : "var(--bg-2)",
+        border: "1px solid " + (value ? "var(--accent-line)" : "var(--line-strong)"),
+        background: value ? "var(--accent)" : "var(--bg-2)",
         cursor: "pointer", padding: 0,
         position: "relative",
       }}>
         <span style={{
-          position: "absolute", top: 1, left: on ? 17 : 1,
+          position: "absolute", top: 1, left: value ? 17 : 1,
           width: 16, height: 16, borderRadius: 999,
-          background: on ? "var(--accent-fg)" : "var(--fg-2)",
+          background: value ? "var(--accent-fg)" : "var(--fg-2)",
           transition: "left 120ms",
         }} />
       </button>

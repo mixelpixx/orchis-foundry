@@ -107,28 +107,56 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Persist: create or reuse the chat, append the user turn + assistant reply.
+	// Verify ownership of an existing chat before we touch anything.
 	chatID := in.ChatID
+	if chatID != 0 {
+		var owner int64
+		if s.db.QueryRowContext(r.Context(), `SELECT user_id FROM ai_chats WHERE id = ? AND repo_id = ?`, chatID, row.ID).Scan(&owner) != nil || owner != u.ID {
+			writeError(w, http.StatusForbidden, "not your chat")
+			return
+		}
+	}
+
+	// Persist create-or-reuse + both turns atomically, so a failure can't leave
+	// an orphaned chat or a half-written exchange.
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save chat")
+		return
+	}
 	if chatID == 0 {
 		title := last.Content
 		if len(title) > 60 {
 			title = title[:60]
 		}
-		res, _ := s.db.ExecContext(r.Context(),
+		res, e := tx.ExecContext(r.Context(),
 			`INSERT INTO ai_chats (user_id, repo_id, title) VALUES (?,?,?)`, u.ID, row.ID, title)
-		chatID, _ = res.LastInsertId()
-	} else {
-		// Verify ownership before appending.
-		var owner int64
-		s.db.QueryRowContext(r.Context(), `SELECT user_id FROM ai_chats WHERE id = ? AND repo_id = ?`, chatID, row.ID).Scan(&owner)
-		if owner != u.ID {
-			writeError(w, http.StatusForbidden, "not your chat")
+		if e == nil {
+			chatID, e = res.LastInsertId()
+		}
+		if e != nil {
+			tx.Rollback()
+			writeError(w, http.StatusInternalServerError, "could not create chat")
 			return
 		}
-		s.db.ExecContext(r.Context(), `UPDATE ai_chats SET updated_at = datetime('now') WHERE id = ?`, chatID)
+	} else {
+		if _, e := tx.ExecContext(r.Context(), `UPDATE ai_chats SET updated_at = datetime('now') WHERE id = ?`, chatID); e != nil {
+			tx.Rollback()
+			writeError(w, http.StatusInternalServerError, "could not update chat")
+			return
+		}
 	}
-	s.db.ExecContext(r.Context(), `INSERT INTO ai_chat_messages (chat_id, role, content) VALUES (?, 'user', ?)`, chatID, last.Content)
-	s.db.ExecContext(r.Context(), `INSERT INTO ai_chat_messages (chat_id, role, content) VALUES (?, 'assistant', ?)`, chatID, out)
+	_, e1 := tx.ExecContext(r.Context(), `INSERT INTO ai_chat_messages (chat_id, role, content) VALUES (?, 'user', ?)`, chatID, last.Content)
+	_, e2 := tx.ExecContext(r.Context(), `INSERT INTO ai_chat_messages (chat_id, role, content) VALUES (?, 'assistant', ?)`, chatID, out)
+	if e1 != nil || e2 != nil {
+		tx.Rollback()
+		writeError(w, http.StatusInternalServerError, "could not save messages")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save chat")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"chatId": chatID, "message": out})
 }

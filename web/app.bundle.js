@@ -2800,9 +2800,7 @@ function DashboardView({
     style: dashStyles.sectionHead
   }, /*#__PURE__*/React.createElement("h2", {
     style: dashStyles.h2
-  }, "Pinned"), /*#__PURE__*/React.createElement("button", {
-    className: "btn ghost sm"
-  }, "Manage")), /*#__PURE__*/React.createElement("div", {
+  }, "Pinned")), /*#__PURE__*/React.createElement("div", {
     style: dashStyles.repoGrid
   }, REPOS.filter(r => r.pinned).map(r => /*#__PURE__*/React.createElement("button", {
     key: r.id,
@@ -3523,7 +3521,11 @@ function RepoView({
     }
   })), /*#__PURE__*/React.createElement("button", {
     className: "btn ghost icon sm",
-    title: "Find in files"
+    title: "Find in files",
+    onClick: () => setRoute({
+      view: "search",
+      repo: repoId
+    })
   }, /*#__PURE__*/React.createElement(Icons.Search, {
     size: 12
   }))), /*#__PURE__*/React.createElement("div", {
@@ -5568,7 +5570,15 @@ function parseMd(md) {
   return out;
 }
 function inlineMd(s) {
-  return s.replace(/`([^`]+)`/g, "<code style=\"font-family: var(--font-mono); background: var(--bg-2); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;\">$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<a href=\"#\" style=\"color: var(--accent); text-decoration: none;\">$1</a>");
+  return s.replace(/`([^`]+)`/g, "<code style=\"font-family: var(--font-mono); background: var(--bg-2); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;\">$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+  // Render real links, but only for http(s)/root-relative URLs — anything else
+  // (e.g. javascript:) is kept as plain text to avoid an injection vector via
+  // dangerouslySetInnerHTML.
+  .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) => {
+    const u = url.trim();
+    if (!/^(https?:\/\/|\/)/i.test(u)) return text;
+    return "<a href=\"" + u + "\" target=\"_blank\" rel=\"noreferrer noopener\" style=\"color: var(--accent); text-decoration: none;\">" + text + "</a>";
+  });
 }
 function RecentActivityView({
   repoId
@@ -9901,17 +9911,10 @@ function ScannerPanel() {
   }), "On each PR open or push, the scanner reviews the diff and posts a result. It never blocks merges by default \u2014 it's a visible check you can act on."));
 }
 function AppsPanel() {
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
-    style: dsStyles.h2
-  }, "OAuth apps"), /*#__PURE__*/React.createElement("p", {
-    className: "muted",
-    style: dsStyles.subtitle
-  }, "Apps you've authorized to act on your behalf."), /*#__PURE__*/React.createElement("div", {
-    className: "card",
-    style: {
-      marginTop: 14
-    }
-  }, [{
+  // OAuth-app authorization isn't part of the platform yet, so there's no
+  // /v1/me/oauth-apps endpoint. Show an honest empty state when running against
+  // a real backend; the sample rows only appear in the offline prototype.
+  const demo = [{
     name: "kelp-deploy-bot",
     scopes: ["repo:read", "actions:read"],
     by: "kelp",
@@ -9921,14 +9924,34 @@ function AppsPanel() {
     scopes: ["repo:read"],
     by: "open-strata",
     last: "2 weeks ago"
-  }].map((a, i) => /*#__PURE__*/React.createElement("div", {
+  }];
+  const apps = window.OrchisAPI ? [] : demo;
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
+    style: dsStyles.h2
+  }, "OAuth apps"), /*#__PURE__*/React.createElement("p", {
+    className: "muted",
+    style: dsStyles.subtitle
+  }, "Apps you've authorized to act on your behalf."), apps.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginTop: 14,
+      padding: "20px 18px",
+      color: "var(--fg-3)",
+      fontSize: 13
+    }
+  }, "No authorized OAuth apps. Apps you grant access to will appear here.") : /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginTop: 14
+    }
+  }, apps.map((a, i) => /*#__PURE__*/React.createElement("div", {
     key: a.name,
     style: {
       display: "flex",
       alignItems: "center",
       gap: 16,
       padding: "14px 18px",
-      borderBottom: i === 0 ? "1px solid var(--line)" : "none"
+      borderBottom: i < apps.length - 1 ? "1px solid var(--line)" : "none"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -9968,52 +9991,77 @@ function AppsPanel() {
     style: {
       fontSize: 10.5
     }
-  }, s)))), /*#__PURE__*/React.createElement("button", {
-    className: "btn ghost sm",
-    style: {
-      color: "var(--danger)"
-    }
-  }, "Revoke")))));
+  }, s))))))));
 }
 function PreferencesPanel() {
+  // Real, persisted preferences only. These map to backend pref keys
+  // (internal/api/preferences.go boolPrefs) and are saved to the account via
+  // PATCH /v1/me/preferences. Both default to on when unset (opt-out).
+  const [prefs, setPrefs] = React.useState(null);
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get("/v1/me/preferences").then(p => setPrefs(p || {})).catch(() => setPrefs({}));
+    } else {
+      setPrefs({});
+    }
+  }, []);
+  const set = (key, val) => {
+    setPrefs(p => ({
+      ...p,
+      [key]: val
+    }));
+    if (window.OrchisAPI) window.OrchisAPI.patch("/v1/me/preferences", {
+      [key]: val
+    }).catch(() => {});
+  };
+  if (!prefs) return /*#__PURE__*/React.createElement("div", {
+    className: "muted",
+    style: {
+      padding: 20
+    }
+  }, "Loading\u2026");
+  const on = k => prefs[k] !== false; // unset ⇒ enabled
+
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
     style: dsStyles.h2
   }, "Preferences"), /*#__PURE__*/React.createElement("p", {
     className: "muted",
     style: dsStyles.subtitle
-  }, "Tune Orchis to your workflow."), /*#__PURE__*/React.createElement("div", {
+  }, "Tune Orchis to your workflow. Changes save to your account."), /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       marginTop: 14,
       padding: 4
     }
   }, /*#__PURE__*/React.createElement(PrefRow, {
-    label: "Email me on review requests",
-    defaultOn: true
+    label: "Show keyboard hints (\u2318K / split tip)",
+    value: on("showSplitTip"),
+    onChange: v => set("showSplitTip", v)
   }), /*#__PURE__*/React.createElement(PrefRow, {
-    label: "Email me when a PAT is about to expire",
-    defaultOn: true
-  }), /*#__PURE__*/React.createElement(PrefRow, {
-    label: "Show 'Cmd+K' hint on home",
-    defaultOn: true
-  }), /*#__PURE__*/React.createElement(PrefRow, {
-    label: "Show keyboard shortcuts in tooltips",
-    defaultOn: true
-  }), /*#__PURE__*/React.createElement(PrefRow, {
-    label: "Auto-merge when checks pass (per-PR opt-in)"
-  })));
+    label: "AI chat sidebar in repositories",
+    value: on("aiChat"),
+    onChange: v => set("aiChat", v),
+    last: true
+  })), /*#__PURE__*/React.createElement("p", {
+    className: "subtle",
+    style: {
+      marginTop: 12,
+      fontSize: 11.5
+    }
+  }, "Theme, accent, density, and font live in the Tweaks panel and also sync to your account."));
 }
 function PrefRow({
   label,
-  defaultOn
+  value,
+  onChange,
+  last
 }) {
-  const [on, setOn] = React.useState(!!defaultOn);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
       padding: "10px 14px",
-      borderBottom: "1px solid var(--line)"
+      borderBottom: last ? "none" : "1px solid var(--line)"
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -10021,13 +10069,14 @@ function PrefRow({
       fontSize: 13
     }
   }, label), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setOn(o => !o),
+    onClick: () => onChange(!value),
+    "aria-pressed": value,
     style: {
       width: 36,
       height: 20,
       borderRadius: 999,
-      border: "1px solid " + (on ? "var(--accent-line)" : "var(--line-strong)"),
-      background: on ? "var(--accent)" : "var(--bg-2)",
+      border: "1px solid " + (value ? "var(--accent-line)" : "var(--line-strong)"),
+      background: value ? "var(--accent)" : "var(--bg-2)",
       cursor: "pointer",
       padding: 0,
       position: "relative"
@@ -10036,11 +10085,11 @@ function PrefRow({
     style: {
       position: "absolute",
       top: 1,
-      left: on ? 17 : 1,
+      left: value ? 17 : 1,
       width: 16,
       height: 16,
       borderRadius: 999,
-      background: on ? "var(--accent-fg)" : "var(--fg-2)",
+      background: value ? "var(--accent-fg)" : "var(--fg-2)",
       transition: "left 120ms"
     }
   })));
@@ -11164,6 +11213,21 @@ function App() {
     document.documentElement.style.setProperty("--font-sans", f.sans);
     document.documentElement.style.setProperty("--font-mono", f.mono);
   }, [t.font]);
+
+  // Buttons should not retain focus after a mouse click. Without this, a clicked
+  // button keeps focus and the global :focus-visible rule re-fires on the next
+  // React re-render — painting a stray accent outline on the *previously* clicked
+  // button when you click another. Suppressing focus-on-pointer makes every
+  // button behave like the React-driven nav items; keyboard (Tab) focus is
+  // untouched, so the accessibility ring still shows for keyboard users.
+  React.useEffect(() => {
+    const onMouseDown = e => {
+      if (e.target.closest("input, textarea, select")) return; // keep field focus
+      if (e.target.closest("button")) e.preventDefault();
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, []);
 
   // Cmd+K palette
   React.useEffect(() => {

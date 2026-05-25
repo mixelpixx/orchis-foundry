@@ -95,6 +95,21 @@ function App() {
     document.documentElement.style.setProperty("--font-mono", f.mono);
   }, [t.font]);
 
+  // Buttons should not retain focus after a mouse click. Without this, a clicked
+  // button keeps focus and the global :focus-visible rule re-fires on the next
+  // React re-render — painting a stray accent outline on the *previously* clicked
+  // button when you click another. Suppressing focus-on-pointer makes every
+  // button behave like the React-driven nav items; keyboard (Tab) focus is
+  // untouched, so the accessibility ring still shows for keyboard users.
+  React.useEffect(() => {
+    const onMouseDown = (e) => {
+      if (e.target.closest("input, textarea, select")) return; // keep field focus
+      if (e.target.closest("button")) e.preventDefault();
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, []);
+
   // Cmd+K palette
   React.useEffect(() => {
     const handler = (e) => {
