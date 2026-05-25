@@ -857,7 +857,7 @@ const dsStyles = {
   sideTab: {
     display: "flex", alignItems: "center", gap: 10,
     height: 34, padding: "0 10px",
-    background: "transparent", border: "1px solid transparent",
+    background: "transparent", borderWidth: 1, borderStyle: "solid", borderColor: "transparent",
     borderRadius: 6, cursor: "pointer", color: "var(--fg-1)",
     fontSize: 13, font: "inherit", fontWeight: 450,
     transition: "background 80ms, color 80ms",
