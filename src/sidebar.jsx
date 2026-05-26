@@ -2,7 +2,7 @@
 function Sidebar({ route, setRoute, openPalette, openTokens, theme, setTheme }) {
   const navItems = [
     { id: "home", label: "Home", icon: <Icons.Home /> },
-    { id: "prs", label: "Pull requests", icon: <Icons.PR />, badge: 3 },
+    { id: "prs", label: "Pull requests", icon: <Icons.PR /> },
     { id: "search", label: "Search", icon: <Icons.Search /> },
     { id: "settings", label: "Developer", icon: <Icons.Key /> },
   ];
@@ -22,6 +22,18 @@ function Sidebar({ route, setRoute, openPalette, openTokens, theme, setTheme }) 
   }, []);
   const pinned = pinnedState != null ? pinnedState : (window.OrchisAPI ? [] : REPOS.filter(r => r.pinned));
 
+  // Live "needs your review" count on the Pull requests nav item.
+  const [prCount, setPrCount] = React.useState(0);
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get("/v1/pulls?filter=review-requested")
+        .then(p => setPrCount(Array.isArray(p) ? p.length : 0))
+        .catch(() => setPrCount(0));
+    }
+  }, []);
+  const prItem = navItems.find(n => n.id === "prs");
+  if (prItem) prItem.badge = prCount > 0 ? prCount : undefined;
+
   return (
     <aside style={sbStyles.aside}>
       <div style={sbStyles.brand}>
@@ -30,7 +42,7 @@ function Sidebar({ route, setRoute, openPalette, openTokens, theme, setTheme }) 
         </div>
         <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
           <span style={{ fontWeight: 600, fontSize: 14 }}>Orchis</span>
-          <span style={{ fontSize: 10.5, color: "var(--fg-3)" }}>avery / kelp</span>
+          <span style={{ fontSize: 10.5, color: "var(--fg-3)" }}>Foundry</span>
         </div>
         <div className="spacer" />
         <NotificationsBell setRoute={setRoute} />

@@ -2213,8 +2213,7 @@ function Sidebar({
   }, {
     id: "prs",
     label: "Pull requests",
-    icon: /*#__PURE__*/React.createElement(Icons.PR, null),
-    badge: 3
+    icon: /*#__PURE__*/React.createElement(Icons.PR, null)
   }, {
     id: "search",
     label: "Search",
@@ -2242,6 +2241,16 @@ function Sidebar({
     return () => window.removeEventListener("orchis:repos-changed", load);
   }, []);
   const pinned = pinnedState != null ? pinnedState : window.OrchisAPI ? [] : REPOS.filter(r => r.pinned);
+
+  // Live "needs your review" count on the Pull requests nav item.
+  const [prCount, setPrCount] = React.useState(0);
+  React.useEffect(() => {
+    if (window.OrchisAPI) {
+      window.OrchisAPI.get("/v1/pulls?filter=review-requested").then(p => setPrCount(Array.isArray(p) ? p.length : 0)).catch(() => setPrCount(0));
+    }
+  }, []);
+  const prItem = navItems.find(n => n.id === "prs");
+  if (prItem) prItem.badge = prCount > 0 ? prCount : undefined;
   return /*#__PURE__*/React.createElement("aside", {
     style: sbStyles.aside
   }, /*#__PURE__*/React.createElement("div", {
@@ -2266,7 +2275,7 @@ function Sidebar({
       fontSize: 10.5,
       color: "var(--fg-3)"
     }
-  }, "avery / kelp")), /*#__PURE__*/React.createElement("div", {
+  }, "Foundry")), /*#__PURE__*/React.createElement("div", {
     className: "spacer"
   }), /*#__PURE__*/React.createElement(NotificationsBell, {
     setRoute: setRoute
