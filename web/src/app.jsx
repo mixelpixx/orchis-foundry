@@ -153,17 +153,19 @@ function App() {
   else view = <DashboardView setRoute={navigate} openPalette={() => setPaletteOpen(true)} route={route} />;
 
   return (
-    <div style={appStyles.shell}>
-      <Sidebar
-        route={route}
-        setRoute={navigate}
-        openPalette={() => setPaletteOpen(true)}
-        theme={theme}
-        setTheme={setTheme}
-      />
-      <main style={appStyles.main}>
-        {view}
-      </main>
+    <div style={appStyles.outer}>
+      <OrchisNav siteHandle="foundry" />
+      <div style={appStyles.shell}>
+        <Sidebar
+          route={route}
+          setRoute={navigate}
+          openPalette={() => setPaletteOpen(true)}
+          theme={theme}
+          setTheme={setTheme}
+        />
+        <main style={appStyles.main}>
+          {view}
+        </main>
 
       <Palette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={navigate} />
 
@@ -223,6 +225,7 @@ function App() {
           <TweakButton label="Create a token (3-step)" onClick={() => navigate({ view: "settings", tab: "tokens", newToken: true })} />
         </TweakSection>
       </TweaksPanel>
+      </div>
     </div>
   );
 }
@@ -230,7 +233,8 @@ function App() {
 // (Tweak controls all come from tweaks-panel.jsx)
 
 const appStyles = {
-  shell: { display: "flex", height: "100%", overflow: "hidden", background: "var(--bg)" },
+  outer: { display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "var(--bg)" },
+  shell: { display: "flex", flex: 1, minHeight: 0, overflow: "hidden", background: "var(--bg)" },
   main: { flex: 1, position: "relative", minWidth: 0, overflow: "hidden" },
   tip: {
     position: "absolute",

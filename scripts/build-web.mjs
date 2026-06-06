@@ -35,6 +35,7 @@ const SOURCES = [
   "src/icons.jsx",
   "src/data.jsx",
   "src/palette.jsx",
+  "src/orchis-nav.jsx",
   "src/sidebar.jsx",
   "src/views/dashboard.jsx",
   "src/views/repo.jsx",

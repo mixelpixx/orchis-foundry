@@ -305,7 +305,11 @@ func securityHeaders(next http.Handler) http.Handler {
 				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"font-src 'self' https://fonts.gstatic.com; "+
 				"img-src 'self' data: https:; "+ // https: lets externally-hosted avatars (e.g. GitHub) render; uploaded avatars are served from 'self'
-				"connect-src 'self'; "+
+				// connect-src: self for the API, plus the sibling admin console
+				// so the cross-site nav can probe "is the caller the admin?".
+				// admin.orchis.ai is gated by an nginx IP allowlist; the probe
+				// only succeeds from the operator's home IP.
+				"connect-src 'self' https://admin.orchis.ai; "+
 				"frame-ancestors 'none'; base-uri 'self'")
 		next.ServeHTTP(w, r)
 	})
