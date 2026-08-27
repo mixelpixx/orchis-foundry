@@ -39,7 +39,6 @@ function OrchisNav({ siteHandle = "foundry" }) {
   const LINKS = [
     { id: "foundry",   label: "Foundry",   href: "https://foundry.orchis.ai" },
     { id: "downloads", label: "Downloads", href: "https://downloads.orchis.ai" },
-    { id: "forum",     label: "Forum",     href: "https://forum.orchis.ai" },
     { id: "kicad",     label: "KiCAD-MCP", href: "https://kicad.orchis.ai" },
   ];
 

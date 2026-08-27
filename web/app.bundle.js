@@ -2242,10 +2242,6 @@ function OrchisNav({
     label: "Downloads",
     href: "https://downloads.orchis.ai"
   }, {
-    id: "forum",
-    label: "Forum",
-    href: "https://forum.orchis.ai"
-  }, {
     id: "kicad",
     label: "KiCAD-MCP",
     href: "https://kicad.orchis.ai"
